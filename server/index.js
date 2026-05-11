@@ -1,0 +1,60 @@
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import morgan from 'morgan';
+import mongoose from 'mongoose';
+import Agenda from 'agenda';
+
+import sitesRouter from './routes/sites.js';
+import jobsRouter from './routes/jobs.js';
+import logsRouter from './routes/logs.js';
+import queueRouter from './routes/queue.js';
+
+const app = express();
+app.disable('x-powered-by');
+app.use(helmet());
+app.use(cors());
+
+const limiter = rateLimit({ windowMs: 60_000, max: 120 });
+app.use(limiter);
+app.use(express.json({ limit: '4mb' }));
+
+// Optional admin key guard for mutating routes
+const ADMIN_KEY = process.env.API_KEY;
+app.use((req, res, next) => {
+  if (!ADMIN_KEY || req.method === 'GET' || req.method === 'OPTIONS') return next();
+  const key = req.get('x-admin-key') || req.query.key || (req.body && req.body.key);
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+});
+
+app.use(morgan('dev'));
+
+const MONGO = process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/remotecontroller';
+const PORT = Number(process.env.PORT || 4000);
+const MANUAL_ONLY = String(process.env.MANUAL_ONLY || 'false').toLowerCase()==='true';
+
+await mongoose.connect(MONGO, { serverSelectionTimeoutMS: 10000, socketTimeoutMS: 45000 });
+const agenda = new Agenda({ db: { address: MONGO, collection: 'agendaJobs' } });
+
+import { defineJobs } from './lib/jobs.js';
+defineJobs(agenda);
+
+app.use((req,_res,next)=>{ req.isManualOnly = MANUAL_ONLY; next(); });
+app.use('/api/sites', (req,_res,next)=>{ req.agenda = agenda; next(); }, sitesRouter);
+app.use('/api/jobs',  (req,_res,next)=>{ req.agenda = agenda; next(); }, jobsRouter);
+app.use('/api/logs', logsRouter);
+app.use('/api/queue', queueRouter);
+
+app.get('/healthz', (_req,res)=> res.json({ ok:true, manualOnly: MANUAL_ONLY }));
+
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use('/', express.static(path.join(__dirname, '../client/dist')));
+
+await agenda.start();
+app.listen(PORT, ()=> console.log('[api] listening on', PORT, 'manualOnly=', MANUAL_ONLY));
