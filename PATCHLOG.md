@@ -1,33 +1,16 @@
-# Patch Log — v2.0 Reliability Build
+# v7 World Class Remote Controller
 
-## Critical logical fixes
-- Queue row is no longer removed before successful WordPress post creation.
-- Empty queue / cooldown / daily-limit runs now log as `skipped`, not fake success.
-- `skipped` status added to log schema to stop Mongoose validation errors.
-- Removed duplicate immediate schedule trigger on site update.
-- Fixed bridge `Backlink` vs plugin `BacklinkURL` mismatch.
-- Fixed queue site selection race in React UI.
-- Fixed WordPress cron being cleared on every page load.
+## Dashboard
 
-## Security and reliability
-- Added admin nonces/capability checks in WordPress plugin.
-- Added dashboard admin key support.
-- Added URL, ObjectId, timezone, schedule, queue, and field validation.
-- Added bridge request timeout/retry helper.
-- Masked API keys in dashboard API responses.
-- Added global Express async error handler.
-- Added graceful Agenda/MongoDB shutdown.
-- Updated npm lockfiles; client and server audit clean at build time.
+- Changed the Remote Controller dashboard to a premium world-class UI.
+- Added Theme Studio palette switching: Aurora, Royal, Emerald, Sunset.
+- Added new Command Center cards for CSV Sync, Gemini Keys, Blog History and Reliability Logs.
+- Improved hero, cards, buttons, tables, metrics, side navigation, mobile responsiveness and typography.
+- Updated visible product name to Remote Controller Pro.
+- Preserved all v6 logic: Gemini API key manager, blog history, smart CSV sync, queue, logs, site controls.
 
-## UI upgrade
-- Full dashboard redesign with modern colors, cards, KPI panels, responsive layout, toast notifications, queue view, logs view, and schedule controls.
-- WordPress plugin admin UI redesigned with queue preview, history, clear actions, browser auto-run and cron controls.
+## Compatibility
 
-
-## v3.0 Smart CSV Auto Update
-- Added dashboard CSV Smart Sync mode: update existing queue rows by Keyword and append new rows.
-- Added Append New, Mirror CSV, and Replace Queue modes.
-- Added duplicate cleanup by Keyword, skip-already-published protection, and detailed sync statistics.
-- Added WordPress plugin CSV Auto Update UI with safe modes and last-sync status.
-- Added Remote Bridge `/queue/sync` endpoint and dashboard `/api/queue/sync` route.
-- Queue rows continue to be removed only after successful post publishing.
+- No database migration needed from v6.
+- Existing server `.env` can stay unchanged.
+- Existing WordPress queue/history/options stay unchanged.

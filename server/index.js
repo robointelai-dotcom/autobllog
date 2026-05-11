@@ -13,6 +13,7 @@ import sitesRouter from './routes/sites.js';
 import jobsRouter from './routes/jobs.js';
 import logsRouter from './routes/logs.js';
 import queueRouter from './routes/queue.js';
+import historyRouter from './routes/history.js';
 import { defineJobs } from './lib/jobs.js';
 import { parseBoolean } from './lib/utils.js';
 
@@ -62,6 +63,7 @@ app.use('/api/sites', (req,_res,next)=>{ req.agenda = agenda; next(); }, sitesRo
 app.use('/api/jobs',  (req,_res,next)=>{ req.agenda = agenda; next(); }, jobsRouter);
 app.use('/api/logs', logsRouter);
 app.use('/api/queue', queueRouter);
+app.use('/api/history', historyRouter);
 
 app.get('/healthz', (_req,res)=> res.json({
   ok:true,

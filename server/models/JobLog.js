@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const JobLogSchema = new mongoose.Schema({
   siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'Site', index: true },
-  action: { type: String, enum: ['ping','run','schedule','queue-bulk'], required: true, index: true },
+  action: { type: String, enum: ['ping','run','schedule','queue-bulk','queue-sync','settings','history','gemini-test'], required: true, index: true },
   status: { type: String, enum: ['success','error','skipped'], required: true, index: true },
   message:{ type: String, default: '' },
   payload:{ type: Object, default: undefined }

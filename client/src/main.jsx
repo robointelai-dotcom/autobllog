@@ -7,6 +7,12 @@ const DEFAULT_CSV = 'Keyword,Topic,Category,Tags,image,Backlink\n'
 
 function getAdminKey(){ return localStorage.getItem('ab_admin_key') || '' }
 function setAdminKey(v){ localStorage.setItem('ab_admin_key', v || '') }
+function randomBridgeKey(){
+  const bytes = new Uint8Array(24)
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes)
+  else for (let i=0;i<bytes.length;i++) bytes[i]=Math.floor(Math.random()*256)
+  return Array.from(bytes, b => b.toString(16).padStart(2,'0')).join('')
+}
 
 async function req(path, options={}){
   const headers = new Headers(options.headers || {})
@@ -103,6 +109,7 @@ function Icon({name}){
     sites:'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14H4V5Zm4 2v2h8V7H8Zm0 4v2h8v-2H8Zm0 4v2h5v-2H8Z',
     queue:'M5 5h14v4H5V5Zm0 6h14v4H5v-4Zm0 6h14v2H5v-2Z',
     logs:'M7 3h10l4 4v14H7V3Zm9 1.5V8h3.5L16 4.5ZM3 7h2v16h12v-2H5V7H3Z',
+    history:'M13 3a9 9 0 1 1-8.5 6H2l3.3-3.3L8.7 9H6.6A7 7 0 1 0 13 5V3Zm-1 4h2v6l5 3-1 1.7-6-3.6V7Z',
     key:'M7 14a4 4 0 1 1 3.5-2.1L21 12v3h-3v3h-3v3h-3v-4.1L10.5 15A4 4 0 0 1 7 14Zm0-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z'
   }
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d={paths[name]||paths.dash}/></svg>
@@ -137,6 +144,24 @@ function AdminKeyBox({notify}){
   </div>
 }
 
+function ThemeStudio({theme,setTheme}){
+  const palettes = [
+    {id:'aurora', name:'Aurora', hint:'Cyan + violet'},
+    {id:'royal', name:'Royal', hint:'Blue + gold'},
+    {id:'emerald', name:'Emerald', hint:'Green + teal'},
+    {id:'sunset', name:'Sunset', hint:'Pink + orange'}
+  ]
+  return <div className="theme-studio">
+    <div className="secure-title"><Icon name="dash"/> Theme Studio</div>
+    <div className="palette-grid">
+      {palettes.map(p=><button key={p.id} className={theme===p.id?'palette active':'palette'} onClick={()=>setTheme(p.id)} title={p.hint}>
+        <span className={'swatch '+p.id}></span><b>{p.name}</b>
+      </button>)}
+    </div>
+    <small>Saved in this browser. Use this to match your brand color.</small>
+  </div>
+}
+
 function KPIs({sites}){
   const t = useMemo(()=>{
     const s={count:sites.length,enabled:0,sent:0,failed:0,lastOk:null}
@@ -161,24 +186,32 @@ function Dashboard({sites,onTab}){
   return <>
     <section className="hero">
       <div>
-        <span className="eyebrow">AutoBlog Control Center</span>
-        <h1>Reliable WordPress auto-posting from one dashboard.</h1>
-        <p>Manage sites, trigger posts, upload CSV queues, check the bridge, and review logs with safer scheduling and better error handling.</p>
+        <span className="eyebrow">Remote Controller Command Center</span>
+        <h1>World-class WordPress automation control room.</h1>
+        <p>Control CSV auto updates, Gemini API keys, post history, queue health, schedules, bridge checks and publishing reliability from one premium dashboard.</p>
         <div className="hero-actions">
-          <button className="btn primary" onClick={()=>onTab('sites')}>Add / manage sites</button>
-          <button className="btn" onClick={()=>onTab('queue')}>Upload queue</button>
+          <button className="btn primary" onClick={()=>onTab('sites')}>Manage sites</button>
+          <button className="btn" onClick={()=>onTab('queue')}>Smart CSV sync</button>
+          <button className="btn glow" onClick={()=>onTab('keys')}>Gemini API keys</button>
+          <button className="btn" onClick={()=>onTab('history')}>Blog history</button>
         </div>
       </div>
       <KPIs sites={sites}/>
     </section>
+    <div className="command-grid">
+      <button className="command-card" onClick={()=>onTab('queue')}><span>01</span><b>Smart CSV Auto Update</b><small>Update changed rows, add new keywords and keep WordPress queue verified.</small></button>
+      <button className="command-card" onClick={()=>onTab('keys')}><span>02</span><b>Gemini Key Manager</b><small>Change, test, save and mask Gemini API settings from the dashboard.</small></button>
+      <button className="command-card" onClick={()=>onTab('history')}><span>03</span><b>Blog Update History</b><small>Open published posts, edit links, warnings and queue remaining count.</small></button>
+      <button className="command-card" onClick={()=>onTab('logs')}><span>04</span><b>Reliability Logs</b><small>Catch bridge, queue, Gemini and WordPress failures before they repeat.</small></button>
+    </div>
     <div className="grid two">
       <div className="card">
         <h2>Reliability checklist</h2>
         <ul className="checklist">
-          <li>Rows stay in WordPress queue until a post is created successfully.</li>
-          <li>Dashboard API uses timeouts, retries, request validation, and protected admin key support.</li>
+          <li>CSV rows are written to the WordPress queue instantly and stay there until a post is published successfully.</li>
+          <li>Dashboard API key manager updates Bridge/Gemini settings safely with masked status checks.</li>
           <li>Schedules are unique per site, with daily limits and timezone-safe reset logic.</li>
-          <li>Logs now support success, error, and skipped states without crashing validation.</li>
+          <li>Blog History and API key actions now log cleanly without validation crashes.</li>
         </ul>
       </div>
       <div className="card">
@@ -272,7 +305,7 @@ function Queue({sites,notify}){
   const [list,setList]=useState({items:[]})
   const [busy,setBusy]=useState(false)
   const [mode,setMode]=useState('smart')
-  const [skipPublished,setSkipPublished]=useState(true)
+  const [skipPublished,setSkipPublished]=useState(false)
   const [autoUpload,setAutoUpload]=useState(false)
   const [lastSync,setLastSync]=useState(null)
 
@@ -280,14 +313,14 @@ function Queue({sites,notify}){
   useEffect(()=>{ if(siteId) load(siteId) },[siteId])
   const stats = useMemo(()=>analyzeCsv(preview, list.items || []),[preview,list])
 
-  async function syncRows(rows=parseCsv(csv), selectedMode=mode){
+  async function syncRows(rows=parseCsv(csv), selectedMode=mode, selectedSkipPublished=skipPublished){
     if(!siteId) return notify('Select site first.', 'error')
     if(!rows.length) return notify('CSV has no valid rows with Keyword.', 'error')
     setBusy(true)
     try {
-      const r = await req('/api/queue/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteId, items:rows, mode:selectedMode, skipPublished})})
+      const r = await req('/api/queue/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteId, items:rows, mode:selectedMode, skipPublished:selectedSkipPublished})})
       setLastSync(r)
-      notify(`CSV synced: +${r.added ?? 0} added, ${r.updated ?? 0} updated, ${r.removed ?? 0} removed. Queue ${r.queueCount ?? '-'}.`, 'success')
+      notify(`CSV synced: +${r.added ?? 0} added, ${r.updated ?? 0} updated, ${r.removed ?? 0} removed, ${r.skippedPublished ?? 0} skipped. Queue ${r.queueCount ?? '-'}.`, (r.skippedPublished ? 'warning' : 'success'))
       await load(siteId)
     }
     catch(e){ notify(e.message, 'error') }
@@ -318,7 +351,7 @@ function Queue({sites,notify}){
 
   return <div className="grid two queue-layout advanced-queue">
     <div className="card csv-master-card">
-      <div className="card-head"><div><h2>Advanced CSV Auto Update</h2><p>Smart Sync fixes the update problem: changed CSV rows update existing queue rows, new keywords are appended, duplicates are cleaned by Keyword.</p></div></div>
+      <div className="card-head"><div><h2>Advanced CSV Auto Update v7</h2><p>Upload the CSV, sync to WordPress, and immediately verify the exact rows saved in the WordPress queue. Smart Sync updates changed rows by Keyword and adds new rows.</p></div></div>
       <div className="sync-panel">
         <label>Target site<select value={siteId} onChange={e=>setSite(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
         <div className="mode-grid">
@@ -328,7 +361,7 @@ function Queue({sites,notify}){
           <label className={mode==='replace'?'mode-card active danger-mode':'mode-card danger-mode'}><input type="radio" checked={mode==='replace'} onChange={()=>setMode('replace')}/><b>Replace</b><span>Clear queue and load CSV.</span></label>
         </div>
         <div className="sync-toggles">
-          <label className="inline-check"><input type="checkbox" checked={skipPublished} onChange={e=>setSkipPublished(e.target.checked)}/> Skip already published keywords</label>
+          <label className="inline-check"><input type="checkbox" checked={skipPublished} onChange={e=>setSkipPublished(e.target.checked)}/> Skip already published keywords <span className="small">(off = show every CSV row in WordPress queue)</span></label>
           <label className="inline-check"><input type="checkbox" checked={autoUpload} onChange={e=>setAutoUpload(e.target.checked)}/> Auto upload after selecting CSV</label>
         </div>
       </div>
@@ -340,8 +373,8 @@ function Queue({sites,notify}){
         <div><span>Will update</span><b>{stats.existing}</b></div>
         <div><span>CSV duplicates</span><b>{stats.duplicateCsv}</b></div>
       </div>
-      <div className="right"><button disabled={busy} className="btn primary" onClick={upload}>{busy?'Syncing...':'Sync CSV to WordPress'}</button><button className="btn" onClick={()=>load()}>Refresh Queue</button><button className="btn danger" onClick={clearAll}>Clear Queue</button></div>
-      {lastSync && <div className="sync-result"><b>Last sync:</b> added {lastSync.added ?? 0}, updated {lastSync.updated ?? 0}, removed {lastSync.removed ?? 0}, skipped published {lastSync.skippedPublished ?? 0}, duplicates fixed {lastSync.duplicatesInCsv ?? 0}, queue {lastSync.queueCount ?? '-'}.</div>}
+      <div className="right"><button disabled={busy} className="btn primary" onClick={upload}>{busy?'Syncing...':'Sync CSV to WordPress'}</button><button disabled={busy} className="btn glow" onClick={()=>syncRows(parseCsv(csv), mode, false)}>Force Sync / Show All Rows</button><button className="btn" onClick={()=>load()}>Refresh Queue</button><button className="btn danger" onClick={clearAll}>Clear Queue</button></div>
+      {lastSync && <div className="sync-result"><b>Last sync:</b> added {lastSync.added ?? 0}, updated {lastSync.updated ?? 0}, removed {lastSync.removed ?? 0}, skipped published {lastSync.skippedPublished ?? 0}, duplicates fixed {lastSync.duplicatesInCsv ?? 0}, queue {lastSync.queueCount ?? '-'}. {lastSync.skippedPublished ? <span className="warn-text"> If rows are missing in WordPress, turn off Skip already published or click Force Sync.</span> : null}</div>}
     </div>
     <div className="card">
       <div className="card-head"><div><h2>Current WordPress Queue</h2><p>Showing first 100 rows. Rows are removed only after a post is published successfully.</p></div><span className="badge neutral">{list.items?.length||0} rows</span></div>
@@ -350,6 +383,219 @@ function Queue({sites,notify}){
         <h3>CSV Preview</h3>
         <div className="table-wrap mini-table"><table><thead><tr><th>Keyword</th><th>Topic</th><th>Category</th></tr></thead><tbody>{preview.slice(0,8).map((r,i)=><tr key={i}><td>{r.Keyword}</td><td>{r.Topic}</td><td>{r.Category}</td></tr>)}</tbody></table></div>
       </div>
+    </div>
+  </div>
+}
+
+
+function ApiKeys({sites,refresh,notify}){
+  const [siteId,setSiteId]=useState('')
+  const [settings,setSettings]=useState(null)
+  const [busy,setBusy]=useState(false)
+  const [bridgeKey,setBridgeKey]=useState('')
+  const [dashboardOnlyKey,setDashboardOnlyKey]=useState('')
+  const [verifyDashboardKey,setVerifyDashboardKey]=useState(true)
+  const [geminiKey,setGeminiKey]=useState('')
+  const [geminiModel,setGeminiModel]=useState('gemini-2.0-flash')
+  const [cronEnabled,setCronEnabled]=useState(false)
+  const selected = sites.find(s=>s._id===siteId)
+
+  useEffect(()=>{
+    setSettings(null); setBridgeKey(''); setDashboardOnlyKey(''); setGeminiKey('')
+    if(siteId) loadSettings(false)
+  },[siteId])
+
+  async function loadSettings(showToast=true){
+    if(!siteId) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/wp-settings')
+      setSettings(r)
+      setGeminiModel(r.geminiModel || 'gemini-2.0-flash')
+      setCronEnabled(!!r.cronEnabled)
+      if(showToast) notify('Remote API status loaded.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function pingSelected(){
+    if(!selected) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{ const r = await req('/api/sites/'+siteId+'/ping',{method:'POST'}); notify('Ping OK: '+JSON.stringify(r), 'success') }
+    catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function saveBridgeKeyToWp(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(!bridgeKey || bridgeKey.trim().length < 12) return notify('Enter a new Bridge API key with at least 12 characters.', 'error')
+    if(!confirm('This will update the WordPress Bridge key and the dashboard saved key together. Continue?')) return
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/wp-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bridgeApiKey:bridgeKey.trim()})})
+      setSettings(r); setBridgeKey(''); await refresh(); notify('Bridge API key updated in WordPress and dashboard.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function saveDashboardKeyOnly(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(!dashboardOnlyKey || dashboardOnlyKey.trim().length < 12) return notify('Enter the Bridge API key saved in WordPress.', 'error')
+    setBusy(true)
+    try{
+      await req('/api/sites/'+siteId+'/api-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:dashboardOnlyKey.trim(),verify:verifyDashboardKey})})
+      setDashboardOnlyKey(''); await refresh(); notify(verifyDashboardKey?'Dashboard key saved and verified.':'Dashboard key saved without verification.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function saveGemini(){
+    if(!siteId) return notify('Select site first.', 'error')
+    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash', cronEnabled }
+    if(geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/wp-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      setSettings(r); setGeminiKey(''); notify('Gemini/API settings updated on WordPress.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function testGemini(){
+    if(!siteId) return notify('Select site first.', 'error')
+    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash' }
+    if(geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/gemini-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      notify(r.message || 'Gemini key test passed.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function saveGeminiAndTest(){
+    await saveGemini()
+    if(siteId) await testGemini()
+  }
+
+  async function clearGemini(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(!confirm('Clear Gemini API key from the selected WordPress site?')) return
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/wp-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearGeminiApiKey:true})})
+      setSettings(r); setGeminiKey(''); notify('Gemini API key cleared on WordPress.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  return <div className="api-page">
+    <section className="hero api-hero">
+      <div>
+        <span className="eyebrow">API Key Manager</span>
+        <h1>Update WordPress Bridge and Gemini keys from the dashboard.</h1>
+        <p>Keys are never shown back in full. The dashboard sends new keys only when you save, then stores only the Bridge key needed for future secure requests.</p>
+        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={()=>loadSettings(true)}>Load remote status</button><button className="btn" disabled={!siteId||busy} onClick={pingSelected}>Ping Bridge</button></div>
+      </div>
+      <div className="card api-selector-card">
+        <label>Select WordPress site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
+        {selected && <div className="selected-site"><b>{selected.name}</b><span>{selected.url}</span><small>{selected.apiKeySet?'Dashboard bridge key saved':'No dashboard bridge key saved'}</small></div>}
+      </div>
+    </section>
+
+    <div className="api-status-grid">
+      <div className="metric"><span>Bridge key</span><strong className="metric-date">{settings? (settings.bridgeKeySet?'Saved':'Missing') : '-'}</strong><small>{settings?.bridgeKeyMasked || 'masked after load'}</small></div>
+      <div className="metric"><span>Gemini key</span><strong className="metric-date">{settings? (settings.geminiKeySet?'Saved':'Missing') : '-'}</strong><small>{settings?.geminiKeyMasked || 'masked after load'}</small></div>
+      <div className="metric"><span>Gemini model</span><strong className="metric-date">{settings?.geminiModel || '-'}</strong><small>Remote WP setting</small></div>
+      <div className="metric"><span>Queue</span><strong>{settings?.queueCount ?? '-'}</strong><small>rows in WordPress</small></div>
+    </div>
+
+    <div className="grid two">
+      <div className="card key-card">
+        <div className="card-head"><div><h2>Change Bridge API key</h2><p>Best option: update WordPress Bridge key and dashboard key together. The old saved key must still work one time for this change.</p></div></div>
+        <label>New Bridge API key<input type="password" value={bridgeKey} placeholder="Paste or generate new bridge key" onChange={e=>setBridgeKey(e.target.value)} /></label>
+        <div className="right"><button className="btn" type="button" onClick={()=>setBridgeKey(randomBridgeKey())}>Generate key</button><button className="btn primary" disabled={!siteId||busy} onClick={saveBridgeKeyToWp}>Update WP + Dashboard</button></div>
+        <hr className="soft-line" />
+        <h3>Dashboard-only key update</h3>
+        <p className="muted">Use this when you already changed the key inside WordPress manually and only need to update the dashboard copy.</p>
+        <label>Existing WordPress Bridge key<input type="password" value={dashboardOnlyKey} placeholder="Key already saved in WordPress" onChange={e=>setDashboardOnlyKey(e.target.value)} /></label>
+        <label className="inline-check verify-check"><input type="checkbox" checked={verifyDashboardKey} onChange={e=>setVerifyDashboardKey(e.target.checked)} /> Verify by ping before saving</label>
+        <div className="right"><button className="btn" disabled={!siteId||busy} onClick={saveDashboardKeyOnly}>Save dashboard key only</button></div>
+      </div>
+
+      <div className="card key-card">
+        <div className="card-head"><div><h2>Update Gemini API settings</h2><p>This updates the SEM SEO BLOGER Gemini key/model on the selected WordPress site through the Bridge.</p></div></div>
+        <label>New Gemini API key<input type="password" value={geminiKey} placeholder="Leave blank to keep existing key" onChange={e=>setGeminiKey(e.target.value)} /></label>
+        <label>Gemini model<input value={geminiModel} placeholder="gemini-2.0-flash" onChange={e=>setGeminiModel(e.target.value)} /></label>
+        <label className="inline-check verify-check"><input type="checkbox" checked={cronEnabled} onChange={e=>setCronEnabled(e.target.checked)} /> Enable WordPress internal cron fallback</label>
+        <div className="right"><button className="btn" disabled={!siteId||busy} onClick={testGemini}>Test key</button><button className="btn primary" disabled={!siteId||busy} onClick={saveGemini}>Save Gemini settings</button><button className="btn glow" disabled={!siteId||busy} onClick={saveGeminiAndTest}>Save + Test</button><button className="btn danger" disabled={!siteId||busy} onClick={clearGemini}>Clear Gemini key</button></div>
+      </div>
+    </div>
+
+    <div className="card">
+      <div className="card-head"><div><h2>Remote settings status</h2><p>Safe masked view only; no full secret is returned from WordPress.</p></div><button className="btn" disabled={!siteId||busy} onClick={()=>loadSettings(true)}>Refresh status</button></div>
+      <div className="settings-json"><pre>{settings ? JSON.stringify(settings, null, 2) : 'Select a site and click Load remote status.'}</pre></div>
+    </div>
+  </div>
+}
+
+
+function BlogHistory({sites,notify}){
+  const [siteId,setSiteId]=useState('')
+  const [rows,setRows]=useState([])
+  const [summary,setSummary]=useState(null)
+  const [busy,setBusy]=useState(false)
+  const [search,setSearch]=useState('')
+  const [limit,setLimit]=useState(100)
+  const selected = sites.find(s=>s._id===siteId)
+
+  useEffect(()=>{ if(siteId) load() },[siteId])
+
+  async function load(){
+    if(!siteId) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/api/history?siteId='+encodeURIComponent(siteId)+'&limit='+encodeURIComponent(limit))
+      setRows(Array.isArray(data.history) ? data.history : [])
+      setSummary(data)
+      notify('Blog update history loaded.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  const shown = rows.filter(r => `${r.title||''} ${r.keyword||''} ${r.status||''} ${r.warning||''}`.toLowerCase().includes(search.toLowerCase()))
+  const published = rows.filter(r => String(r.status||r.post_status||'').toLowerCase().includes('publish')).length
+  const warnings = rows.filter(r => r.warning).length
+
+  return <div className="history-page">
+    <section className="hero history-hero">
+      <div>
+        <span className="eyebrow">Blog Update History</span>
+        <h1>Check every blog published by the Remote Controller.</h1>
+        <p>View WordPress posting history, published URLs, edit links, keywords, warnings, queue remaining count and latest CSV sync status from one dashboard.</p>
+        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={load}>{busy?'Loading...':'Refresh history'}</button></div>
+      </div>
+      <div className="card api-selector-card">
+        <label>Select WordPress site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
+        {selected && <div className="selected-site"><b>{selected.name}</b><span>{selected.url}</span><small>{summary?.bridgeVersion ? 'Bridge '+summary.bridgeVersion : 'Remote history endpoint'}</small></div>}
+      </div>
+    </section>
+
+    <div className="api-status-grid">
+      <div className="metric"><span>Total loaded</span><strong>{rows.length}</strong><small>{summary?.historyCount ?? rows.length} stored in WordPress</small></div>
+      <div className="metric"><span>Published</span><strong>{published}</strong><small>successful rows</small></div>
+      <div className="metric"><span>Warnings</span><strong>{warnings}</strong><small>image or content warnings</small></div>
+      <div className="metric"><span>Queue now</span><strong>{summary?.queueCount ?? '-'}</strong><small>WordPress queue rows</small></div>
+    </div>
+
+    <div className="card">
+      <div className="card-head">
+        <div><h2>Published blog history</h2><p>Search by title, keyword, status, or warning. Open WordPress post/edit links directly.</p></div>
+        <div className="history-tools"><input placeholder="Search history" value={search} onChange={e=>setSearch(e.target.value)}/><select value={limit} onChange={e=>setLimit(Number(e.target.value))}><option value="50">50 rows</option><option value="100">100 rows</option><option value="250">250 rows</option><option value="500">500 rows</option></select><button className="btn" disabled={!siteId||busy} onClick={load}>Reload</button></div>
+      </div>
+      {summary?.lastError && <div className="notice danger-notice"><b>Last WordPress error:</b> {summary.lastError}</div>}
+      <div className="table-wrap history-table"><table><thead><tr><th>Time</th><th>Blog</th><th>Keyword</th><th>Status</th><th>Queue</th><th>Links</th><th>Warning</th></tr></thead><tbody>{shown.map((h,i)=><tr key={(h.post_id||'row')+'-'+i}><td><small>{h.timestamp || h.created || '-'}</small></td><td><strong>{h.title || '-'}</strong><div className="small">Post ID: {h.post_id || '-'}</div></td><td>{h.keyword || '-'}</td><td><span className={'badge '+((h.status||h.post_status||'').toLowerCase().includes('publish')?'success':'neutral')}>{h.status || h.post_status || '-'}</span></td><td>{h.queue_remaining ?? '-'}</td><td><div className="action-stack history-actions">{h.post_url && <a className="btn small-btn" href={h.post_url} target="_blank" rel="noreferrer">View</a>}{h.edit_url && <a className="btn small-btn" href={h.edit_url} target="_blank" rel="noreferrer">Edit</a>}</div></td><td className="small log-message">{h.warning || '-'}</td></tr>)}</tbody></table></div>
+      {!shown.length && <p className="muted empty-state">No history rows found. Publish one post from Queue/Sites, then click Refresh history.</p>}
     </div>
   </div>
 }
@@ -366,24 +612,28 @@ function Logs({notify}){
   useEffect(()=>{ load() },[filter.status, filter.action])
   return <div className="card">
     <div className="card-head"><div><h2>Execution logs</h2><p>Use logs to catch bridge, queue, Gemini, or WordPress errors fast.</p></div><button className="btn" onClick={load}>Refresh</button></div>
-    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
+    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
     <div className="table-wrap"><table><thead><tr><th>When</th><th>Site</th><th>Action</th><th>Status</th><th>Message</th></tr></thead><tbody>{logs.map(l=><tr key={l._id}><td><small>{new Date(l.createdAt).toLocaleString()}</small></td><td className="small">{l.siteId}</td><td>{l.action}</td><td><span className={'badge '+(l.status==='success'?'success':l.status==='skipped'?'neutral':'error')}>{l.status}</span></td><td className="small log-message">{l.message}</td></tr>)}</tbody></table></div>
   </div>
 }
 
 function App(){
   const [tab,setTab]=useState('dash')
+  const [themeValue,setThemeValue]=useState(()=>localStorage.getItem('ab_theme') || 'aurora')
+  const setTheme=(v)=>{ setThemeValue(v); localStorage.setItem('ab_theme', v) }
+  useEffect(()=>{ document.documentElement.setAttribute('data-theme', themeValue) },[themeValue])
   const [toast,setToast]=useState(null)
   const notify=(message,type='success')=>setToast({message,type})
   const {sites,loading,refresh}=useSites(notify)
-  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':'Logs'
+  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='history'?'Blog History':tab==='keys'?'API Keys':'Logs'
 
-  return <div className="layout">
+  return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">A</span><div><b>AutoBlog</b><small>Market Content Engine</small></div></div>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro</b><small>CSV → Gemini → WordPress</small></div></div>
+      <ThemeStudio theme={themeValue} setTheme={setTheme}/>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v3.0 smart CSV build</footer>
+      <footer>v7 World Class Remote Controller • Theme Studio + History + Gemini Key Manager</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'}</span><h1>{title}</h1></div><button className="btn" onClick={refresh}>Refresh sites</button></header>
@@ -391,6 +641,8 @@ function App(){
         {tab==='dash' && <Dashboard sites={sites} onTab={setTab}/>} 
         {tab==='sites' && <><AddSite onAdded={refresh} notify={notify}/><Sites sites={sites} refresh={refresh} notify={notify}/></>}
         {tab==='queue' && <Queue sites={sites} notify={notify}/>} 
+        {tab==='history' && <BlogHistory sites={sites} notify={notify}/>} 
+        {tab==='keys' && <ApiKeys sites={sites} refresh={refresh} notify={notify}/>} 
         {tab==='logs' && <Logs notify={notify}/>} 
       </div>
     </main>

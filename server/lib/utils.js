@@ -11,7 +11,27 @@ export function asyncHandler(fn){
 
 export function cleanString(value, max=500){
   if (value === undefined || value === null) return '';
-  return String(value).replace(/\u0000/g, '').trim().slice(0, max);
+  return String(value)
+    .replace(/^\uFEFF/, '')
+    .replace(/\u0000/g, '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .normalize('NFKC')
+    .trim()
+    .slice(0, max);
+}
+
+function pickAlias(obj, names){
+  if (!obj || typeof obj !== 'object') return '';
+  const direct = names.find(n => Object.prototype.hasOwnProperty.call(obj, n));
+  if (direct) return obj[direct];
+  const map = new Map(Object.keys(obj).map(k => [String(k).replace(/^\uFEFF/, '').replace(/[\s_\-]+/g,'').toLowerCase(), k]));
+  for (const n of names){
+    const key = String(n).replace(/[\s_\-]+/g,'').toLowerCase();
+    if (map.has(key)) return obj[map.get(key)];
+  }
+  return '';
 }
 
 export function normalizeSiteUrl(value){
@@ -90,16 +110,22 @@ export function validateQueueItems(items){
   if (!Array.isArray(items)) throw new Error('items must be an array');
   if (items.length === 0) throw new Error('no rows');
   if (items.length > 5000) { const err = new Error('too many rows (max 5000)'); err.status = 413; throw err; }
+  const seen = new Set();
   return items.map((it, idx) => {
     const row = {
-      Keyword: cleanString(it?.Keyword, 240),
-      Topic: cleanString(it?.Topic, 240),
-      Category: cleanString(it?.Category, 120),
-      Tags: cleanString(it?.Tags, 500),
-      image: cleanString(it?.image || it?.Image || it?.image_url, 2000),
-      Backlink: cleanString(it?.Backlink || it?.BacklinkURL || it?.backlink_url, 2000)
+      Keyword: cleanString(pickAlias(it, ['Keyword','keyword','Keywords','keywords','Title','title']), 240),
+      Topic: cleanString(pickAlias(it, ['Topic','topic','Subject','subject']), 240),
+      Category: cleanString(pickAlias(it, ['Category','category','Categories','categories']), 120),
+      Tags: cleanString(pickAlias(it, ['Tags','tags','Tag','tag']), 500),
+      image: cleanString(pickAlias(it, ['image','Image','image_url','ImageURL','imageUrl','featured_image','Featured Image']), 2000),
+      Backlink: cleanString(pickAlias(it, ['Backlink','backlink','BacklinkURL','backlink_url','backlinkUrl','URL','url']), 2000)
     };
     if (!row.Keyword) { const err = new Error(`row ${idx+1}: Keyword is required`); err.status = 400; throw err; }
+    if (!row.Topic) row.Topic = row.Keyword;
+    if (!row.Category) row.Category = 'Uncategorized';
+    const key = row.Keyword.replace(/\s+/g, ' ').toLowerCase();
+    if (seen.has(key)) row._duplicateInUpload = true;
+    seen.add(key);
     return row;
   });
 }

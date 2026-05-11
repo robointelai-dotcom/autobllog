@@ -52,14 +52,14 @@ router.post('/sync', asyncHandler(async (req,res)=>{
   if (!site) return;
   const allowedModes = new Set(['smart','append','replace','mirror']);
   const mode = allowedModes.has(req.body?.mode) ? req.body.mode : 'smart';
-  const skipPublished = req.body?.skipPublished !== false;
+  const skipPublished = req.body?.skipPublished === true;
   const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/sync');
   const r = await fetchWithTimeout(u, {
     method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
-    body: JSON.stringify({ items, mode, skipPublished })
+    body: JSON.stringify({ items, mode, skipPublished, source: 'dashboard-v5' })
   }, Number(process.env.BRIDGE_TIMEOUT_MS || 60000));
   const data = await readBridgeResponse(r);
-  await JobLog.create({ siteId: site._id, action:'queue-sync', status:'success', message:`CSV ${mode}: added ${data.added ?? 0}, updated ${data.updated ?? 0}, removed ${data.removed ?? 0}, queue ${data.queueCount ?? '?'}`, payload: data });
+  await JobLog.create({ siteId: site._id, action:'queue-sync', status:'success', message:`CSV ${mode}: added ${data.added ?? 0}, updated ${data.updated ?? 0}, removed ${data.removed ?? 0}, skipped ${data.skippedPublished ?? 0}, queue ${data.queueCount ?? '?'}`, payload: data });
   res.json(data);
 }));
 
