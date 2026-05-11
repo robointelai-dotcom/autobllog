@@ -1,28 +1,43 @@
-import rateLimit from 'express-rate-limit';
-import helmet from 'helmet';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import mongoose from 'mongoose';
 import Agenda from 'agenda';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import sitesRouter from './routes/sites.js';
 import jobsRouter from './routes/jobs.js';
 import logsRouter from './routes/logs.js';
 import queueRouter from './routes/queue.js';
+import { defineJobs } from './lib/jobs.js';
+import { parseBoolean } from './lib/utils.js';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(helmet());
-app.use(cors());
+app.set('trust proxy', 1);
+app.use(helmet({ contentSecurityPolicy: false }));
 
-const limiter = rateLimit({ windowMs: 60_000, max: 120 });
-app.use(limiter);
-app.use(express.json({ limit: '4mb' }));
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, cb){
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS blocked'));
+  },
+  credentials: true
+}));
 
-// Optional admin key guard for mutating routes
-const ADMIN_KEY = process.env.API_KEY;
+app.use(rateLimit({ windowMs: 60_000, max: Number(process.env.RATE_LIMIT_PER_MIN || 240), standardHeaders: true, legacyHeaders: false }));
+app.use(express.json({ limit: process.env.JSON_LIMIT || '4mb' }));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+const ADMIN_KEY = process.env.API_KEY || process.env.ADMIN_KEY || '';
 app.use((req, res, next) => {
   if (!ADMIN_KEY || req.method === 'GET' || req.method === 'OPTIONS') return next();
   const key = req.get('x-admin-key') || req.query.key || (req.body && req.body.key);
@@ -30,16 +45,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(morgan('dev'));
-
-const MONGO = process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/remotecontroller';
+const MONGO = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/remotecontroller';
 const PORT = Number(process.env.PORT || 4000);
-const MANUAL_ONLY = String(process.env.MANUAL_ONLY || 'false').toLowerCase()==='true';
+const MANUAL_ONLY = parseBoolean(process.env.MANUAL_ONLY, false);
 
 await mongoose.connect(MONGO, { serverSelectionTimeoutMS: 10000, socketTimeoutMS: 45000 });
-const agenda = new Agenda({ db: { address: MONGO, collection: 'agendaJobs' } });
-
-import { defineJobs } from './lib/jobs.js';
+const agenda = new Agenda({
+  db: { address: MONGO, collection: 'agendaJobs' },
+  processEvery: process.env.SCAN_EVERY || '1 minute',
+  maxConcurrency: Math.max(1, Number(process.env.AGENDA_MAX_CONCURRENCY || 20))
+});
 defineJobs(agenda);
 
 app.use((req,_res,next)=>{ req.isManualOnly = MANUAL_ONLY; next(); });
@@ -48,13 +63,40 @@ app.use('/api/jobs',  (req,_res,next)=>{ req.agenda = agenda; next(); }, jobsRou
 app.use('/api/logs', logsRouter);
 app.use('/api/queue', queueRouter);
 
-app.get('/healthz', (_req,res)=> res.json({ ok:true, manualOnly: MANUAL_ONLY }));
+app.get('/healthz', (_req,res)=> res.json({
+  ok:true,
+  manualOnly: MANUAL_ONLY,
+  nodeEnv: process.env.NODE_ENV || 'development',
+  serverTime: new Date().toISOString(),
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  mongoReadyState: mongoose.connection.readyState
+}));
 
-import path from 'path';
-import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use('/', express.static(path.join(__dirname, '../client/dist')));
+const clientDist = path.join(__dirname, '../client/dist');
+app.use('/', express.static(clientDist));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(clientDist, 'index.html'), err => err && next());
+});
+
+app.use((err, _req, res, _next) => {
+  console.error('[api-error]', err);
+  if (res.headersSent) return;
+  res.status(err.status || 500).json({ error: err.message || 'Server error' });
+});
 
 await agenda.start();
-app.listen(PORT, ()=> console.log('[api] listening on', PORT, 'manualOnly=', MANUAL_ONLY));
+const server = app.listen(PORT, ()=> console.log('[api] listening on', PORT, 'manualOnly=', MANUAL_ONLY));
+
+async function shutdown(signal){
+  console.log(`[api] ${signal} received, shutting down...`);
+  server.close(async () => {
+    await agenda.stop().catch(()=>{});
+    await mongoose.disconnect().catch(()=>{});
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

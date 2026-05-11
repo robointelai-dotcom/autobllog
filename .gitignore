@@ -7,4 +7,3 @@ dist/
 build/
 .cache/
 .DS_Store
-*.zip

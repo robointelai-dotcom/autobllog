@@ -1,50 +1,77 @@
 import express from 'express';
-import fetch from 'node-fetch';
 import Site from '../models/Site.js';
+import JobLog from '../models/JobLog.js';
+import { fetchWithTimeout, readBridgeResponse } from '../lib/http.js';
+import { asyncHandler, isObjectId, validateQueueItems, wpEndpoint } from '../lib/utils.js';
 
 const router = express.Router();
 
-router.get('/', async (req,res)=>{
-  const { siteId } = req.query;
-  const site = await Site.findById(siteId);
-  if (!site) return res.status(404).json({ error:'site not found' });
-  const u = new URL('wp-json/grb/v1/queue', site.url).toString();
-  const r = await fetch(u, { headers:{ 'x-api-key': site.apiKey } });
-  const t = await r.text();
-  try{ res.status(r.ok?200:500).json(JSON.parse(t)) }catch{ res.status(r.ok?200:500).send(t) }
-});
-
-router.post('/append', async (req,res)=>{
-  const { siteId, items } = req.body || {};
-  if (!Array.isArray(items)) return res.status(400).json({ error:'items must be an array' });
-  if (items.length === 0) return res.status(400).json({ error:'no rows' });
-  if (items.length > 5000) return res.status(413).json({ error:'too many rows (max 5000)' });
-  for (let i=0;i<items.length;i++){
-    const it = items[i] || {};
-    if (!it.Keyword || typeof it.Keyword !== 'string') return res.status(400).json({ error:`row ${i+1}: Keyword is required` });
+async function findSiteOr404(siteId, res){
+  if (!isObjectId(siteId)) {
+    res.status(400).json({ error:'valid siteId required' });
+    return null;
   }
   const site = await Site.findById(siteId);
-  if (!site) return res.status(404).json({ error:'site not found' });
-  const u = new URL('wp-json/grb/v1/queue/append', site.url).toString();
-  const r = await fetch(u, {
+  if (!site) {
+    res.status(404).json({ error:'site not found' });
+    return null;
+  }
+  return site;
+}
+
+router.get('/', asyncHandler(async (req,res)=>{
+  const site = await findSiteOr404(req.query.siteId, res);
+  if (!site) return;
+  const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue');
+  const r = await fetchWithTimeout(u, { headers:{ 'x-api-key': site.apiKey } }, Number(process.env.BRIDGE_TIMEOUT_MS || 30000));
+  res.json(await readBridgeResponse(r));
+}));
+
+router.post('/append', asyncHandler(async (req,res)=>{
+  let items;
+  try { items = validateQueueItems(req.body?.items); }
+  catch (e) { return res.status(e.status || 400).json({ error:e.message }); }
+  const site = await findSiteOr404(req.body?.siteId, res);
+  if (!site) return;
+  const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/append');
+  const r = await fetchWithTimeout(u, {
     method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
     body: JSON.stringify({ items })
-  });
-  const t = await r.text();
-  try{ res.status(r.ok?200:500).json(JSON.parse(t)) }catch{ res.status(r.ok?200:500).send(t) }
-});
+  }, Number(process.env.BRIDGE_TIMEOUT_MS || 45000));
+  const data = await readBridgeResponse(r);
+  await JobLog.create({ siteId: site._id, action:'queue-bulk', status:'success', message:`Uploaded ${items.length} queue rows`, payload: data });
+  res.json(data);
+}));
 
-router.post('/clear', async (req,res)=>{
-  const { siteId, all } = req.body || {};
-  const site = await Site.findById(siteId);
-  if (!site) return res.status(404).json({ error:'site not found' });
-  const u = new URL('wp-json/grb/v1/queue/clear', site.url).toString();
-  const r = await fetch(u, {
+
+router.post('/sync', asyncHandler(async (req,res)=>{
+  let items;
+  try { items = validateQueueItems(req.body?.items); }
+  catch (e) { return res.status(e.status || 400).json({ error:e.message }); }
+  const site = await findSiteOr404(req.body?.siteId, res);
+  if (!site) return;
+  const allowedModes = new Set(['smart','append','replace','mirror']);
+  const mode = allowedModes.has(req.body?.mode) ? req.body.mode : 'smart';
+  const skipPublished = req.body?.skipPublished !== false;
+  const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/sync');
+  const r = await fetchWithTimeout(u, {
     method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
-    body: JSON.stringify({ all: !!all })
-  });
-  const t = await r.text();
-  try{ res.status(r.ok?200:500).json(JSON.parse(t)) }catch{ res.status(r.ok?200:500).send(t) }
-});
+    body: JSON.stringify({ items, mode, skipPublished })
+  }, Number(process.env.BRIDGE_TIMEOUT_MS || 60000));
+  const data = await readBridgeResponse(r);
+  await JobLog.create({ siteId: site._id, action:'queue-sync', status:'success', message:`CSV ${mode}: added ${data.added ?? 0}, updated ${data.updated ?? 0}, removed ${data.removed ?? 0}, queue ${data.queueCount ?? '?'}`, payload: data });
+  res.json(data);
+}));
+
+router.post('/clear', asyncHandler(async (req,res)=>{
+  const site = await findSiteOr404(req.body?.siteId, res);
+  if (!site) return;
+  const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/clear');
+  const r = await fetchWithTimeout(u, {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
+    body: JSON.stringify({ all: true })
+  }, Number(process.env.BRIDGE_TIMEOUT_MS || 30000));
+  res.json(await readBridgeResponse(r));
+}));
 
 export default router;
