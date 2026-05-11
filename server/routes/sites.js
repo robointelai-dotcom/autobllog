@@ -95,6 +95,7 @@ router.post('/:id/wp-settings', asyncHandler(async (req,res)=>{
     if (v) payload.geminiModel = v;
   }
   if ('customPrompt' in body) payload.customPrompt = cleanString(body.customPrompt, 20000);
+  if ('clearCustomPrompt' in body) payload.clearCustomPrompt = !!body.clearCustomPrompt;
   if ('cronEnabled' in body) payload.cronEnabled = !!body.cronEnabled;
 
   if (Object.keys(payload).length === 0) return res.status(400).json({ error:'No setting changes supplied' });
@@ -147,6 +148,55 @@ router.post('/:id/gemini-test', asyncHandler(async (req,res)=>{
     res.json(data);
   } catch(e) {
     await JobLog.create({ siteId: site._id, action:'gemini-test', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
+    res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
+  }
+}));
+
+
+router.get('/:id/prompt', asyncHandler(async (req,res)=>{
+  const site = await loadSiteOr404(req.params.id);
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/prompt');
+    await JobLog.create({ siteId: site._id, action:'prompt', status:'success', message:'Loaded prompt studio settings', payload:{ customPromptSet:data.customPromptSet, customPromptLength:data.customPromptLength } }).catch(()=>{});
+    res.json(data);
+  } catch(e) {
+    // Backward compatible fallback for old bridge: at least return prompt status from settings.
+    try {
+      const settings = await callBridge(site, '/wp-json/grb/v1/settings');
+      const fallback = { ok:true, fallback:true, customPrompt:'', defaultPrompt:'', variables:['$topic','$keyword','$backlink'], ...settings };
+      res.json(fallback);
+    } catch(e2) {
+      await JobLog.create({ siteId: site._id, action:'prompt', status:'error', message:e2.message, payload:e2.payload }).catch(()=>{});
+      res.status(e2.status && e2.status < 500 ? e2.status : 502).json({ error:e2.message, payload:e2.payload });
+    }
+  }
+}));
+
+router.post('/:id/prompt', asyncHandler(async (req,res)=>{
+  const site = await loadSiteOr404(req.params.id);
+  const body = req.body || {};
+  const payload = {};
+  if ('clearCustomPrompt' in body) payload.clearCustomPrompt = !!body.clearCustomPrompt;
+  if ('customPrompt' in body) payload.customPrompt = cleanString(body.customPrompt, 20000);
+  if ('previewTopic' in body) payload.previewTopic = cleanString(body.previewTopic, 240);
+  if ('previewKeyword' in body) payload.previewKeyword = cleanString(body.previewKeyword, 240);
+  if (Object.keys(payload).length === 0) return res.status(400).json({ error:'No prompt changes supplied' });
+  try {
+    let data;
+    try {
+      data = await callBridge(site, '/wp-json/grb/v1/prompt', { method:'POST', json: payload });
+    } catch (e) {
+      // Fallback for bridge versions that only support /settings.
+      if ('customPrompt' in payload || payload.clearCustomPrompt) {
+        data = await callBridge(site, '/wp-json/grb/v1/settings', { method:'POST', json: payload });
+      } else {
+        throw e;
+      }
+    }
+    await JobLog.create({ siteId: site._id, action:'prompt', status:'success', message: payload.clearCustomPrompt ? 'Custom prompt reset to default' : 'Custom prompt saved from dashboard', payload:{ customPromptLength:data.customPromptLength, warnings:data.warnings || [] } }).catch(()=>{});
+    res.json(data);
+  } catch(e) {
+    await JobLog.create({ siteId: site._id, action:'prompt', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
     res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
   }
 }));

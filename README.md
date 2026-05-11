@@ -1,33 +1,35 @@
-# AutoBlog Pro v7 - World Class Remote Controller
+# AutoBlog Pro v9 Prompt Studio Final
 
-Premium remote dashboard for CSV → Gemini → WordPress automation.
+Remote Controller dashboard for WordPress SEM SEO BLOGER automation.
 
-## v7 highlights
-
-- World-class glassmorphism dashboard redesign
-- Remote Controller Command Center home screen
-- Theme Studio with Aurora, Royal, Emerald and Sunset palettes
-- Smart CSV Auto Update v7 queue workflow
-- Gemini API key manager retained
-- Blog update history retained
-- Reliability logs, bridge checks, queue sync and WordPress post actions retained
+Features:
+- Smart CSV Auto Update to WordPress queue
+- Gemini API Key Manager
+- Prompt Studio for Gemini article prompt editing
+- Blog Update History
+- Remote Bridge diagnostics
+- World-class themed dashboard UI
 
 ## Server
 
 ```bash
 cd /opt/autoblog/server
-npm install --no-audit --no-fund --legacy-peer-deps
-
-cd /opt/autoblog/client
-npm install --no-audit --no-fund --legacy-peer-deps
-npm run build
-
-pm2 restart all
+npm install --no-audit --no-fund --legacy-peer-deps --ignore-scripts
+npm start
 ```
 
-## WordPress plugins
+## Client
 
-Upload the two plugin ZIP files from `release-plugins` or the final package.
+```bash
+cd /opt/autoblog/client
+npm install --no-audit --no-fund --legacy-peer-deps --ignore-scripts
+npm run build
+```
 
-1. SEM SEO BLOGER v7 compatible
-2. Remote Bridge v7 compatible
+## Health check
+
+```bash
+curl -s https://domaincontroller.in/api/healthz
+```
+
+Expected appVersion: `v9-prompt-studio-final`.

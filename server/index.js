@@ -68,7 +68,7 @@ app.use('/api/history', historyRouter);
 function healthPayload(){
   return {
     ok:true,
-    appVersion:'v8-api-history-csv-hotfix',
+    appVersion:'v9-prompt-studio-final',
     manualOnly: MANUAL_ONLY,
     nodeEnv: process.env.NODE_ENV || 'development',
     serverTime: new Date().toISOString(),
@@ -83,7 +83,7 @@ app.get('/api/healthz', (_req,res)=> res.json(healthPayload()));
 app.use('/api', (req, res) => {
   res.status(404).json({
     error: `API route not found: ${req.method} ${req.originalUrl}`,
-    appVersion: 'v8-api-history-csv-hotfix',
+    appVersion: 'v9-prompt-studio-final',
     hint: 'If you expected this route, the old Node process may still be running. Restart /opt/autoblog/server.'
   });
 });

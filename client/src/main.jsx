@@ -138,7 +138,8 @@ function Icon({name}){
     queue:'M5 5h14v4H5V5Zm0 6h14v4H5v-4Zm0 6h14v2H5v-2Z',
     logs:'M7 3h10l4 4v14H7V3Zm9 1.5V8h3.5L16 4.5ZM3 7h2v16h12v-2H5V7H3Z',
     history:'M13 3a9 9 0 1 1-8.5 6H2l3.3-3.3L8.7 9H6.6A7 7 0 1 0 13 5V3Zm-1 4h2v6l5 3-1 1.7-6-3.6V7Z',
-    key:'M7 14a4 4 0 1 1 3.5-2.1L21 12v3h-3v3h-3v3h-3v-4.1L10.5 15A4 4 0 0 1 7 14Zm0-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z'
+    key:'M7 14a4 4 0 1 1 3.5-2.1L21 12v3h-3v3h-3v3h-3v-4.1L10.5 15A4 4 0 0 1 7 14Zm0-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
+    prompt:'M4 4h16v12H7.5L4 19.5V4Zm3 4v2h10V8H7Zm0 4v2h7v-2H7Z'
   }
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d={paths[name]||paths.dash}/></svg>
 }
@@ -216,11 +217,12 @@ function Dashboard({sites,onTab}){
       <div>
         <span className="eyebrow">Remote Controller Command Center</span>
         <h1>World-class WordPress automation control room.</h1>
-        <p>Control CSV auto updates, Gemini API keys, post history, queue health, schedules, bridge checks and publishing reliability from one premium dashboard.</p>
+        <p>Control CSV auto updates, Gemini API keys, Prompt Studio, post history, queue health, schedules, bridge checks and publishing reliability from one premium dashboard.</p>
         <div className="hero-actions">
           <button className="btn primary" onClick={()=>onTab('sites')}>Manage sites</button>
           <button className="btn" onClick={()=>onTab('queue')}>Smart CSV sync</button>
-          <button className="btn glow" onClick={()=>onTab('keys')}>Gemini API keys</button>
+          <button className="btn glow" onClick={()=>onTab('prompt')}>Prompt Studio</button>
+          <button className="btn" onClick={()=>onTab('keys')}>Gemini API keys</button>
           <button className="btn" onClick={()=>onTab('history')}>Blog history</button>
         </div>
       </div>
@@ -229,8 +231,9 @@ function Dashboard({sites,onTab}){
     <div className="command-grid">
       <button className="command-card" onClick={()=>onTab('queue')}><span>01</span><b>Smart CSV Auto Update</b><small>Update changed rows, add new keywords and keep WordPress queue verified.</small></button>
       <button className="command-card" onClick={()=>onTab('keys')}><span>02</span><b>Gemini Key Manager</b><small>Change, test, save and mask Gemini API settings from the dashboard.</small></button>
-      <button className="command-card" onClick={()=>onTab('history')}><span>03</span><b>Blog Update History</b><small>Open published posts, edit links, warnings and queue remaining count.</small></button>
-      <button className="command-card" onClick={()=>onTab('logs')}><span>04</span><b>Reliability Logs</b><small>Catch bridge, queue, Gemini and WordPress failures before they repeat.</small></button>
+      <button className="command-card" onClick={()=>onTab('prompt')}><span>03</span><b>Prompt Studio</b><small>Edit Gemini article prompts with variables, preview, save and reset controls.</small></button>
+      <button className="command-card" onClick={()=>onTab('history')}><span>04</span><b>Blog Update History</b><small>Open published posts, edit links, warnings and queue remaining count.</small></button>
+      <button className="command-card" onClick={()=>onTab('logs')}><span>05</span><b>Reliability Logs</b><small>Catch bridge, queue, prompt, Gemini and WordPress failures before they repeat.</small></button>
     </div>
     <div className="grid two">
       <div className="card">
@@ -238,6 +241,7 @@ function Dashboard({sites,onTab}){
         <ul className="checklist">
           <li>CSV rows are written to the WordPress queue instantly and stay there until a post is published successfully.</li>
           <li>Dashboard API key manager updates Bridge/Gemini settings safely with masked status checks.</li>
+          <li>Prompt Studio updates the WordPress Gemini prompt with $topic, $keyword and $backlink variables.</li>
           <li>Schedules are unique per site, with daily limits and timezone-safe reset logic.</li>
           <li>Blog History and API key actions now log cleanly without validation crashes.</li>
         </ul>
@@ -379,7 +383,7 @@ function Queue({sites,notify}){
 
   return <div className="grid two queue-layout advanced-queue">
     <div className="card csv-master-card">
-      <div className="card-head"><div><h2>Advanced CSV Auto Update v8</h2><p>Upload CSV, sync to WordPress, and verify exact rows saved. v8 detects comma, semicolon, tab and pipe CSV and shows clear backend/plugin errors.</p></div></div>
+      <div className="card-head"><div><h2>Advanced CSV Auto Update v9</h2><p>Upload CSV, sync to WordPress, and verify exact rows saved. v9 detects comma, semicolon, tab and pipe CSV, plus Prompt Studio backend health checks.</p></div></div>
       <div className="sync-panel">
         <label>Target site<select value={siteId} onChange={e=>setSite(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
         <div className="mode-grid">
@@ -581,6 +585,138 @@ function ApiKeys({sites,refresh,notify}){
 }
 
 
+
+function PromptStudio({sites,notify}){
+  const [siteId,setSiteId]=useState('')
+  const [prompt,setPrompt]=useState('')
+  const [defaultPrompt,setDefaultPrompt]=useState('')
+  const [preview,setPreview]=useState('')
+  const [warnings,setWarnings]=useState([])
+  const [status,setStatus]=useState(null)
+  const [busy,setBusy]=useState(false)
+  const [sample,setSample]=useState({topic:'open demat account', keyword:'open demat account'})
+  const selected = sites.find(s=>s._id===siteId)
+
+  useEffect(()=>{ if(siteId) loadPrompt() },[siteId])
+
+  async function loadPrompt(){
+    if(!siteId) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/api/sites/'+siteId+'/prompt?previewTopic='+encodeURIComponent(sample.topic)+'&previewKeyword='+encodeURIComponent(sample.keyword))
+      setStatus(data)
+      setPrompt(data.customPrompt || '')
+      setDefaultPrompt(data.defaultPrompt || '')
+      setPreview(data.activePromptPreview || '')
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : [])
+      notify(data.fallback ? 'Prompt status loaded. Update Bridge plugin to v9 for full prompt read/write.' : 'Prompt Studio loaded.', data.fallback ? 'warning' : 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  function validateLocal(text){
+    const out=[]
+    if(!text.trim()) return out
+    if(!text.includes('$topic') && !text.includes('{{topic}}') && !text.includes('{topic}')) out.push('Missing $topic / {{topic}} variable.')
+    if(!text.includes('$keyword') && !text.includes('{{keyword}}') && !text.includes('{keyword}')) out.push('Missing $keyword / {{keyword}} variable.')
+    if(!/html/i.test(text)) out.push('Recommended: mention HTML output format.')
+    if(text.length > 20000) out.push('Prompt is too long. Max 20000 characters.')
+    return out
+  }
+
+  function localPreview(text){
+    const active = text.trim() ? text : (defaultPrompt || '')
+    return active
+      .replaceAll('$topic', sample.topic).replaceAll('{{topic}}', sample.topic).replaceAll('{topic}', sample.topic)
+      .replaceAll('$keyword', sample.keyword).replaceAll('{{keyword}}', sample.keyword).replaceAll('{keyword}', sample.keyword)
+      .replaceAll('$backlink', 'https://example.com').replaceAll('{{backlink}}', 'https://example.com').replaceAll('{backlink}', 'https://example.com')
+  }
+
+  useEffect(()=>{ setWarnings(validateLocal(prompt)); setPreview(localPreview(prompt)) },[prompt, sample.topic, sample.keyword, defaultPrompt])
+
+  async function savePrompt(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(prompt.length > 20000) return notify('Prompt too long. Max 20000 characters.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/api/sites/'+siteId+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customPrompt:prompt, previewTopic:sample.topic, previewKeyword:sample.keyword})})
+      setStatus(data)
+      setPrompt(data.customPrompt || prompt)
+      setDefaultPrompt(data.defaultPrompt || defaultPrompt)
+      setPreview(data.activePromptPreview || localPreview(prompt))
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : validateLocal(prompt))
+      notify('Prompt saved to WordPress plugin.', (data.warnings && data.warnings.length) ? 'warning' : 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function resetPrompt(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(!confirm('Reset this site to the built-in default Gemini prompt?')) return
+    setBusy(true)
+    try{
+      const data = await req('/api/sites/'+siteId+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearCustomPrompt:true, previewTopic:sample.topic, previewKeyword:sample.keyword})})
+      setStatus(data); setPrompt(''); setDefaultPrompt(data.defaultPrompt || defaultPrompt); setPreview(data.activePromptPreview || data.defaultPrompt || ''); setWarnings(Array.isArray(data.warnings)?data.warnings:[])
+      notify('Prompt reset to default.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  function insertSnippet(snippet){
+    setPrompt(p => (p ? p + '\n\n' : '') + snippet)
+  }
+
+  const promptChars = prompt.length
+  const variableOk = !prompt.trim() || (prompt.includes('$topic') || prompt.includes('{{topic}}') || prompt.includes('{topic}')) && (prompt.includes('$keyword') || prompt.includes('{{keyword}}') || prompt.includes('{keyword}'))
+
+  return <div className="prompt-page">
+    <section className="hero prompt-hero">
+      <div>
+        <span className="eyebrow">Prompt Studio</span>
+        <h1>Change your Gemini blog prompt from the Remote Controller.</h1>
+        <p>Edit the article generation prompt used by SEM SEO BLOGER. Use variables like <b>$topic</b>, <b>$keyword</b> and <b>$backlink</b>, preview the final prompt, then save it directly into WordPress through the Bridge.</p>
+        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={loadPrompt}>{busy?'Loading...':'Load prompt'}</button><button className="btn glow" disabled={!siteId||busy} onClick={savePrompt}>Save prompt</button><button className="btn danger" disabled={!siteId||busy} onClick={resetPrompt}>Reset default</button></div>
+      </div>
+      <div className="card api-selector-card">
+        <label>Select WordPress site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
+        {selected && <div className="selected-site"><b>{selected.name}</b><span>{selected.url}</span><small>{status?.customPromptSet?'Custom prompt active':'Built-in prompt active'}</small></div>}
+      </div>
+    </section>
+
+    <div className="api-status-grid">
+      <div className="metric"><span>Prompt mode</span><strong className="metric-date">{status? (status.customPromptSet?'Custom':'Default') : '-'}</strong><small>Remote WordPress setting</small></div>
+      <div className="metric"><span>Characters</span><strong>{promptChars}</strong><small>Max 20000</small></div>
+      <div className="metric"><span>Variables</span><strong className="metric-date">{variableOk?'OK':'Check'}</strong><small>$topic + $keyword recommended</small></div>
+      <div className="metric"><span>Bridge</span><strong className="metric-date">{status?.bridgeVersion || '-'}</strong><small>Prompt endpoint</small></div>
+    </div>
+
+    <div className="grid two prompt-grid">
+      <div className="card prompt-editor-card">
+        <div className="card-head"><div><h2>Prompt editor</h2><p>Leave empty to use default prompt. Save only when you want custom generation logic.</p></div></div>
+        <textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={'Example:\nWrite a 1500+ word SEO article about "$topic". Include "$keyword" naturally. Return clean HTML only.'}></textarea>
+        <div className="prompt-toolbar">
+          <button className="btn small-btn" onClick={()=>insertSnippet('Use Indian market examples, SEBI-safe educational wording, and avoid investment advice guarantees.')}>Add compliance line</button>
+          <button className="btn small-btn" onClick={()=>insertSnippet('Return clean HTML only with one <p> meta description, one <h1> title, then <h2>, <h3>, <p>, <ul>, <li>.')}>Add HTML format</button>
+          <button className="btn small-btn" onClick={()=>insertSnippet('Naturally include this backlink once if provided: $backlink')}>Add backlink rule</button>
+        </div>
+        {warnings.length>0 && <div className="notice danger-notice"><b>Prompt warnings:</b><ul>{warnings.map((w,i)=><li key={i}>{w}</li>)}</ul></div>}
+        <div className="right"><button className="btn" disabled={!siteId||busy} onClick={loadPrompt}>Reload</button><button className="btn primary" disabled={!siteId||busy} onClick={savePrompt}>Save Prompt</button></div>
+      </div>
+
+      <div className="card prompt-preview-card">
+        <div className="card-head"><div><h2>Live preview</h2><p>Preview with sample topic and keyword before saving.</p></div></div>
+        <div className="form-grid sample-grid"><label>Sample topic<input value={sample.topic} onChange={e=>setSample({...sample,topic:e.target.value})}/></label><label>Sample keyword<input value={sample.keyword} onChange={e=>setSample({...sample,keyword:e.target.value})}/></label></div>
+        <pre className="prompt-preview">{preview || 'Select a site and load prompt.'}</pre>
+      </div>
+    </div>
+
+    <div className="card">
+      <div className="card-head"><div><h2>Default prompt backup</h2><p>Use this if you want to copy the built-in default into your custom prompt and edit it.</p></div><button className="btn" disabled={!defaultPrompt} onClick={()=>setPrompt(defaultPrompt)}>Copy default to editor</button></div>
+      <pre className="prompt-preview compact">{defaultPrompt || 'Default prompt appears after loading a site.'}</pre>
+    </div>
+  </div>
+}
+
 function BlogHistory({sites,notify}){
   const [siteId,setSiteId]=useState('')
   const [rows,setRows]=useState([])
@@ -653,7 +789,7 @@ function Logs({notify}){
   useEffect(()=>{ load() },[filter.status, filter.action])
   return <div className="card">
     <div className="card-head"><div><h2>Execution logs</h2><p>Use logs to catch bridge, queue, Gemini, or WordPress errors fast.</p></div><button className="btn" onClick={load}>Refresh</button></div>
-    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
+    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option><option value="prompt">prompt</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
     <div className="table-wrap"><table><thead><tr><th>When</th><th>Site</th><th>Action</th><th>Status</th><th>Message</th></tr></thead><tbody>{logs.map(l=><tr key={l._id}><td><small>{new Date(l.createdAt).toLocaleString()}</small></td><td className="small">{l.siteId}</td><td>{l.action}</td><td><span className={'badge '+(l.status==='success'?'success':l.status==='skipped'?'neutral':'error')}>{l.status}</span></td><td className="small log-message">{l.message}</td></tr>)}</tbody></table></div>
   </div>
 }
@@ -666,15 +802,15 @@ function App(){
   const [toast,setToast]=useState(null)
   const notify=(message,type='success')=>setToast({message,type})
   const {sites,loading,refresh}=useSites(notify)
-  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='history'?'Blog History':tab==='keys'?'API Keys':'Logs'
+  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='keys'?'API Keys':'Logs'
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v8</b><small>CSV → Gemini → WordPress</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v9</b><small>CSV → Gemini → WordPress</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v8 Hotfix • CSV Sync + API Keys + Blog History verified</footer>
+      <footer>v9 Final • Prompt Studio + CSV Sync + API Keys + History</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'}</span><h1>{title}</h1></div><button className="btn" onClick={refresh}>Refresh sites</button></header>
@@ -682,6 +818,7 @@ function App(){
         {tab==='dash' && <Dashboard sites={sites} onTab={setTab}/>} 
         {tab==='sites' && <><AddSite onAdded={refresh} notify={notify}/><Sites sites={sites} refresh={refresh} notify={notify}/></>}
         {tab==='queue' && <Queue sites={sites} notify={notify}/>} 
+        {tab==='prompt' && <PromptStudio sites={sites} notify={notify}/>} 
         {tab==='history' && <BlogHistory sites={sites} notify={notify}/>} 
         {tab==='keys' && <ApiKeys sites={sites} refresh={refresh} notify={notify}/>} 
         {tab==='logs' && <Logs notify={notify}/>} 

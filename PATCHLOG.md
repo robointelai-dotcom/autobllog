@@ -1,16 +1,20 @@
-# v7 World Class Remote Controller
+# AutoBlog Pro v9 Prompt Studio Final
 
-## Dashboard
+## Added
+- Remote Controller dashboard Prompt Studio tab.
+- Load current WordPress custom prompt from Bridge.
+- Save custom Gemini prompt from dashboard.
+- Reset prompt to built-in default from dashboard.
+- Prompt preview with sample topic/keyword.
+- Prompt warnings for missing `$topic` / `$keyword` variables.
+- Prompt action logs.
+- Bridge `/wp-json/grb/v1/prompt` GET/POST endpoint.
+- SEM SEO BLOGER support for `$topic`, `$keyword`, `$backlink`, `{{topic}}`, `{{keyword}}`, `{{backlink}}` variables.
 
-- Changed the Remote Controller dashboard to a premium world-class UI.
-- Added Theme Studio palette switching: Aurora, Royal, Emerald, Sunset.
-- Added new Command Center cards for CSV Sync, Gemini Keys, Blog History and Reliability Logs.
-- Improved hero, cards, buttons, tables, metrics, side navigation, mobile responsiveness and typography.
-- Updated visible product name to Remote Controller Pro.
-- Preserved all v6 logic: Gemini API key manager, blog history, smart CSV sync, queue, logs, site controls.
-
-## Compatibility
-
-- No database migration needed from v6.
-- Existing server `.env` can stay unchanged.
-- Existing WordPress queue/history/options stay unchanged.
+## Retained
+- Smart CSV sync.
+- API key manager.
+- Gemini test/save.
+- Blog history.
+- Queue diagnostics.
+- World-class dashboard UI themes.
