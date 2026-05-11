@@ -65,14 +65,28 @@ app.use('/api/logs', logsRouter);
 app.use('/api/queue', queueRouter);
 app.use('/api/history', historyRouter);
 
-app.get('/healthz', (_req,res)=> res.json({
-  ok:true,
-  manualOnly: MANUAL_ONLY,
-  nodeEnv: process.env.NODE_ENV || 'development',
-  serverTime: new Date().toISOString(),
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  mongoReadyState: mongoose.connection.readyState
-}));
+function healthPayload(){
+  return {
+    ok:true,
+    appVersion:'v8-api-history-csv-hotfix',
+    manualOnly: MANUAL_ONLY,
+    nodeEnv: process.env.NODE_ENV || 'development',
+    serverTime: new Date().toISOString(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    mongoReadyState: mongoose.connection.readyState
+  };
+}
+app.get('/healthz', (_req,res)=> res.json(healthPayload()));
+app.get('/api/healthz', (_req,res)=> res.json(healthPayload()));
+
+
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: `API route not found: ${req.method} ${req.originalUrl}`,
+    appVersion: 'v8-api-history-csv-hotfix',
+    hint: 'If you expected this route, the old Node process may still be running. Restart /opt/autoblog/server.'
+  });
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

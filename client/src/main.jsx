@@ -20,12 +20,38 @@ async function req(path, options={}){
   if (adminKey) headers.set('x-admin-key', adminKey)
   const r = await fetch(API+path, { ...options, headers })
   const ct = r.headers.get('content-type') || ''
-  const payload = ct.includes('json') ? await r.json().catch(()=>({})) : await r.text().catch(()=> '')
+  const raw = await r.text().catch(()=> '')
+  let payload = raw
+  if (ct.includes('json')) {
+    try { payload = raw ? JSON.parse(raw) : {} } catch { payload = raw }
+  } else if (raw && raw.trim().startsWith('{')) {
+    try { payload = JSON.parse(raw) } catch {}
+  }
   if(!r.ok){
-    const message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : payload
+    let message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : String(payload || '')
+    if (/Cannot\s+(GET|POST|PUT|DELETE)\s+\/api\//i.test(message) || /<!doctype html/i.test(message)) {
+      message = 'Dashboard backend is still old or not restarted. API route missing: '+path+'. Restart the Node server from /opt/autoblog/server and clear browser cache.'
+    }
     throw new Error(message || r.statusText)
   }
   return payload
+}
+
+function detectDelimiter(line){
+  const candidates = [',',';','\t','|']
+  let best = ',', bestCount = -1
+  for (const d of candidates){
+    let count = 0, inQuotes = false
+    for (let i=0;i<line.length;i++){
+      const c=line[i]
+      if (c === '"') {
+        if (inQuotes && line[i+1] === '"') i++
+        else inQuotes = !inQuotes
+      } else if (!inQuotes && c === d) count++
+    }
+    if (count > bestCount){ best = d; bestCount = count }
+  }
+  return bestCount > 0 ? best : ','
 }
 
 function parseCsv(text){
@@ -37,6 +63,8 @@ function parseCsv(text){
     .normalize('NFKC')
 
   text = clean(text)
+  const firstLine = (text.split(/\r?\n/).find(l => l.trim()) || '')
+  const delimiter = detectDelimiter(firstLine)
   const rows = []
   let row = [], field = '', inQuotes = false
   for (let i = 0; i < text.length; i++) {
@@ -48,8 +76,8 @@ function parseCsv(text){
       } else field += c
     } else {
       if (c === '"') inQuotes = true
-      else if (c === ',') { row.push(field.trim()); field = '' }
-      else if (c === '\n') { row.push(field.trim()); rows.push(row); row = []; field = '' }
+      else if (c === delimiter) { row.push(field.trim()); field = '' }
+      else if (c === '\n') { row.push(field.trim()); if (row.some(Boolean)) rows.push(row); row = []; field = '' }
       else if (c !== '\r') field += c
     }
   }
@@ -58,16 +86,16 @@ function parseCsv(text){
   if (!rows.length) return []
 
   let headerRow = rows[0].map(h => clean(h).trim())
-  const hasHeader = headerRow.some(h => /^keyword$/i.test(h.replace(/\s+/g,'')))
+  const hasHeader = headerRow.some(h => /^(keyword|keywords|title)$/i.test(h.replace(/[\s_\-]+/g,'')))
   if (!hasHeader) headerRow = ['Keyword','Topic','Category','Tags','image','Backlink']
 
   const alias = {
     keyword: 'Keyword', keywords: 'Keyword', title: 'Keyword',
     topic: 'Topic', subject: 'Topic', category: 'Category', categories: 'Category',
-    tags: 'Tags', tag: 'Tags', image: 'image', imageurl: 'image', image_url: 'image', images: 'image',
-    backlink: 'Backlink', backlinkurl: 'Backlink', backlink_url: 'Backlink', url: 'Backlink'
+    tags: 'Tags', tag: 'Tags', image: 'image', imageurl: 'image', image_url: 'image', featuredimage: 'image', images: 'image',
+    backlink: 'Backlink', backlinkurl: 'Backlink', backlink_url: 'Backlink', url: 'Backlink', link: 'Backlink'
   }
-  const normHeader = headerRow.map(h => alias[h.replace(/\s+/g,'').toLowerCase()] || h)
+  const normHeader = headerRow.map(h => alias[h.replace(/[\s_\-]+/g,'').toLowerCase()] || h)
   const idx = name => normHeader.findIndex(h => h.toLowerCase() === name.toLowerCase())
   const value = (r, name) => {
     const i = idx(name)
@@ -351,7 +379,7 @@ function Queue({sites,notify}){
 
   return <div className="grid two queue-layout advanced-queue">
     <div className="card csv-master-card">
-      <div className="card-head"><div><h2>Advanced CSV Auto Update v7</h2><p>Upload the CSV, sync to WordPress, and immediately verify the exact rows saved in the WordPress queue. Smart Sync updates changed rows by Keyword and adds new rows.</p></div></div>
+      <div className="card-head"><div><h2>Advanced CSV Auto Update v8</h2><p>Upload CSV, sync to WordPress, and verify exact rows saved. v8 detects comma, semicolon, tab and pipe CSV and shows clear backend/plugin errors.</p></div></div>
       <div className="sync-panel">
         <label>Target site<select value={siteId} onChange={e=>setSite(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
         <div className="mode-grid">
@@ -449,10 +477,15 @@ function ApiKeys({sites,refresh,notify}){
     finally{ setBusy(false) }
   }
 
+  function geminiPayload(includeKey=true){
+    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash', cronEnabled }
+    if(includeKey && geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
+    return payload
+  }
+
   async function saveGemini(){
     if(!siteId) return notify('Select site first.', 'error')
-    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash', cronEnabled }
-    if(geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
+    const payload = geminiPayload(true)
     setBusy(true)
     try{
       const r = await req('/api/sites/'+siteId+'/wp-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -463,8 +496,7 @@ function ApiKeys({sites,refresh,notify}){
 
   async function testGemini(){
     if(!siteId) return notify('Select site first.', 'error')
-    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash' }
-    if(geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
+    const payload = geminiPayload(true)
     setBusy(true)
     try{
       const r = await req('/api/sites/'+siteId+'/gemini-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -474,8 +506,17 @@ function ApiKeys({sites,refresh,notify}){
   }
 
   async function saveGeminiAndTest(){
-    await saveGemini()
-    if(siteId) await testGemini()
+    if(!siteId) return notify('Select site first.', 'error')
+    const payload = geminiPayload(true)
+    setBusy(true)
+    try{
+      const saved = await req('/api/sites/'+siteId+'/wp-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      setSettings(saved)
+      const tested = await req('/api/sites/'+siteId+'/gemini-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ geminiModel: payload.geminiModel })})
+      setGeminiKey('')
+      notify((tested.message || 'Gemini key test passed') + ' after save.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
   }
 
   async function clearGemini(){
@@ -629,11 +670,11 @@ function App(){
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro</b><small>CSV → Gemini → WordPress</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v8</b><small>CSV → Gemini → WordPress</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
       <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v7 World Class Remote Controller • Theme Studio + History + Gemini Key Manager</footer>
+      <footer>v8 Hotfix • CSV Sync + API Keys + Blog History verified</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'}</span><h1>{title}</h1></div><button className="btn" onClick={refresh}>Refresh sites</button></header>
