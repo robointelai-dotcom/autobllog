@@ -201,6 +201,58 @@ router.post('/:id/prompt', asyncHandler(async (req,res)=>{
   }
 }));
 
+
+
+router.get('/:id/plugins', asyncHandler(async (req,res)=>{
+  const site = await loadSiteOr404(req.params.id);
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/plugins');
+    await JobLog.create({ siteId: site._id, action:'plugins', status:'success', message:`Loaded ${data.count ?? 0} remote plugins`, payload:{ activeCount:data.activeCount, inactiveCount:data.inactiveCount, updateCount:data.updateCount } }).catch(()=>{});
+    res.json(data);
+  } catch(e) {
+    await JobLog.create({ siteId: site._id, action:'plugins', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
+    res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
+  }
+}));
+
+router.post('/:id/plugins/action', asyncHandler(async (req,res)=>{
+  const site = await loadSiteOr404(req.params.id);
+  const body = req.body || {};
+  const action = cleanString(body.action, 40).toLowerCase();
+  const plugin = cleanString(body.plugin, 500);
+  const allowed = ['activate','deactivate','reactivate','delete'];
+  if (!allowed.includes(action)) return res.status(400).json({ error:'Invalid plugin action' });
+  if (!plugin) return res.status(400).json({ error:'Plugin file is required' });
+  const payload = { action, plugin, forceDeactivate: !!body.forceDeactivate };
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/plugins/action', { method:'POST', json: payload });
+    await JobLog.create({ siteId: site._id, action:'plugin-'+action, status:'success', message:`${action} completed for ${plugin}`, payload:{ plugin, activeCount:data.activeCount, inactiveCount:data.inactiveCount } }).catch(()=>{});
+    res.json(data);
+  } catch(e) {
+    await JobLog.create({ siteId: site._id, action:'plugin-'+action, status:'error', message:e.message, payload:e.payload || { plugin } }).catch(()=>{});
+    res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
+  }
+}));
+
+router.post('/:id/plugins/upload', asyncHandler(async (req,res)=>{
+  const site = await loadSiteOr404(req.params.id);
+  const body = req.body || {};
+  const filename = cleanString(body.filename, 240);
+  const contentBase64 = typeof body.contentBase64 === 'string' ? body.contentBase64 : '';
+  if (!filename || !filename.toLowerCase().endsWith('.zip')) return res.status(400).json({ error:'Only .zip plugin upload is allowed' });
+  if (!contentBase64) return res.status(400).json({ error:'contentBase64 is required' });
+  if (contentBase64.length > Number(process.env.PLUGIN_UPLOAD_BASE64_LIMIT || 90 * 1024 * 1024)) return res.status(413).json({ error:'Plugin ZIP is too large for dashboard upload' });
+  const payload = { filename, contentBase64, activate: !!body.activate };
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/plugins/upload', { method:'POST', json: payload });
+    await JobLog.create({ siteId: site._id, action:'plugin-upload', status:'success', message:`Uploaded plugin ${filename}${data.activated ? ' and activated it' : ''}`, payload:{ filename, installedPlugin:data.installedPlugin, activated:data.activated } }).catch(()=>{});
+    res.json(data);
+  } catch(e) {
+    await JobLog.create({ siteId: site._id, action:'plugin-upload', status:'error', message:e.message, payload:e.payload || { filename } }).catch(()=>{});
+    res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
+  }
+}));
+
 router.delete('/:id', asyncHandler(async (req,res)=>{
   const id = req.params.id;
   if (!isObjectId(id)) return res.status(400).json({ error:'Invalid site id' });

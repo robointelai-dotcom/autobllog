@@ -14,6 +14,17 @@ function randomBridgeKey(){
   return Array.from(bytes, b => b.toString(16).padStart(2,'0')).join('')
 }
 
+function arrayBufferToBase64(buffer){
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode.apply(null, chunk)
+  }
+  return btoa(binary)
+}
+
 async function req(path, options={}){
   const headers = new Headers(options.headers || {})
   const adminKey = getAdminKey()
@@ -139,7 +150,8 @@ function Icon({name}){
     logs:'M7 3h10l4 4v14H7V3Zm9 1.5V8h3.5L16 4.5ZM3 7h2v16h12v-2H5V7H3Z',
     history:'M13 3a9 9 0 1 1-8.5 6H2l3.3-3.3L8.7 9H6.6A7 7 0 1 0 13 5V3Zm-1 4h2v6l5 3-1 1.7-6-3.6V7Z',
     key:'M7 14a4 4 0 1 1 3.5-2.1L21 12v3h-3v3h-3v3h-3v-4.1L10.5 15A4 4 0 0 1 7 14Zm0-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
-    prompt:'M4 4h16v12H7.5L4 19.5V4Zm3 4v2h10V8H7Zm0 4v2h7v-2H7Z'
+    prompt:'M4 4h16v12H7.5L4 19.5V4Zm3 4v2h10V8H7Zm0 4v2h7v-2H7Z',
+    plugins:'M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3 5.9 3.3L12 10.9 6.1 7.6 12 4.3ZM5 9.2l6 3.3v6.7l-6-3.3V9.2Zm14 0v6.7l-6 3.3v-6.7l6-3.3Z'
   }
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d={paths[name]||paths.dash}/></svg>
 }
@@ -217,13 +229,14 @@ function Dashboard({sites,onTab}){
       <div>
         <span className="eyebrow">Remote Controller Command Center</span>
         <h1>World-class WordPress automation control room.</h1>
-        <p>Control CSV auto updates, Gemini API keys, Prompt Studio, post history, queue health, schedules, bridge checks and publishing reliability from one premium dashboard.</p>
+        <p>Control CSV auto updates, Gemini API keys, Prompt Studio, WordPress plugin upload/activation/removal, post history, queue health, schedules and bridge checks from one premium dashboard.</p>
         <div className="hero-actions">
           <button className="btn primary" onClick={()=>onTab('sites')}>Manage sites</button>
           <button className="btn" onClick={()=>onTab('queue')}>Smart CSV sync</button>
           <button className="btn glow" onClick={()=>onTab('prompt')}>Prompt Studio</button>
           <button className="btn" onClick={()=>onTab('keys')}>Gemini API keys</button>
           <button className="btn" onClick={()=>onTab('history')}>Blog history</button>
+          <button className="btn" onClick={()=>onTab('plugins')}>Plugin Manager</button>
         </div>
       </div>
       <KPIs sites={sites}/>
@@ -233,7 +246,8 @@ function Dashboard({sites,onTab}){
       <button className="command-card" onClick={()=>onTab('keys')}><span>02</span><b>Gemini Key Manager</b><small>Change, test, save and mask Gemini API settings from the dashboard.</small></button>
       <button className="command-card" onClick={()=>onTab('prompt')}><span>03</span><b>Prompt Studio</b><small>Edit Gemini article prompts with variables, preview, save and reset controls.</small></button>
       <button className="command-card" onClick={()=>onTab('history')}><span>04</span><b>Blog Update History</b><small>Open published posts, edit links, warnings and queue remaining count.</small></button>
-      <button className="command-card" onClick={()=>onTab('logs')}><span>05</span><b>Reliability Logs</b><small>Catch bridge, queue, prompt, Gemini and WordPress failures before they repeat.</small></button>
+      <button className="command-card" onClick={()=>onTab('plugins')}><span>05</span><b>Plugin Manager</b><small>Upload plugin ZIPs, activate, deactivate, reactivate and remove plugins remotely.</small></button>
+      <button className="command-card" onClick={()=>onTab('logs')}><span>06</span><b>Reliability Logs</b><small>Catch bridge, queue, prompt, Gemini and WordPress failures before they repeat.</small></button>
     </div>
     <div className="grid two">
       <div className="card">
@@ -242,6 +256,7 @@ function Dashboard({sites,onTab}){
           <li>CSV rows are written to the WordPress queue instantly and stay there until a post is published successfully.</li>
           <li>Dashboard API key manager updates Bridge/Gemini settings safely with masked status checks.</li>
           <li>Prompt Studio updates the WordPress Gemini prompt with $topic, $keyword and $backlink variables.</li>
+          <li>Plugin Manager uploads ZIP files and manages activate, deactivate, reactivate and remove actions through the secure bridge.</li>
           <li>Schedules are unique per site, with daily limits and timezone-safe reset logic.</li>
           <li>Blog History and API key actions now log cleanly without validation crashes.</li>
         </ul>
@@ -777,6 +792,121 @@ function BlogHistory({sites,notify}){
   </div>
 }
 
+
+function PluginManager({sites,notify}){
+  const [siteId,setSiteId]=useState('')
+  const [data,setData]=useState(null)
+  const [busy,setBusy]=useState(false)
+  const [query,setQuery]=useState('')
+  const [file,setFile]=useState(null)
+  const [activateAfter,setActivateAfter]=useState(true)
+  const selected = sites.find(s=>s._id===siteId)
+
+  useEffect(()=>{ setData(null); if(siteId) loadPlugins(false) },[siteId])
+
+  async function loadPlugins(showToast=true){
+    if(!siteId) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/plugins')
+      setData(r)
+      if(showToast) notify(`Loaded ${r.count ?? 0} plugins from WordPress.`, 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function runAction(plugin, action){
+    if(!siteId) return notify('Select site first.', 'error')
+    const labels = {activate:'activate', deactivate:'deactivate', reactivate:'reactivate', delete:'delete permanently'}
+    if(['deactivate','reactivate','delete'].includes(action) && !confirm(`Are you sure you want to ${labels[action]} ${plugin.name}?`)) return
+    setBusy(true)
+    try{
+      const r = await req('/api/sites/'+siteId+'/plugins/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plugin:plugin.plugin, action, forceDeactivate: action==='delete'})})
+      setData(r)
+      notify(`${plugin.name} ${action} completed.`, 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  async function uploadPlugin(){
+    if(!siteId) return notify('Select site first.', 'error')
+    if(!file) return notify('Choose a plugin ZIP first.', 'error')
+    if(!file.name.toLowerCase().endsWith('.zip')) return notify('Only .zip plugin files are allowed.', 'error')
+    if(file.size > 60 * 1024 * 1024) return notify('Plugin ZIP is too large. Keep it under 60 MB.', 'error')
+    if(!confirm(`Upload ${file.name} to ${selected?.name || 'selected site'}${activateAfter ? ' and activate it' : ''}?`)) return
+    setBusy(true)
+    try{
+      const contentBase64 = arrayBufferToBase64(await file.arrayBuffer())
+      const r = await req('/api/sites/'+siteId+'/plugins/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name, contentBase64, activate:activateAfter})})
+      setData(r); setFile(null)
+      notify(`Plugin uploaded${r.activated ? ' and activated' : ''}.`, 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+
+  const plugins = (data?.plugins || []).filter(p => `${p.name} ${p.plugin} ${p.author}`.toLowerCase().includes(query.toLowerCase()))
+  const updates = data?.updateCount ?? plugins.filter(p=>p.updateAvailable).length
+
+  return <div className="plugin-page">
+    <section className="hero prompt-hero">
+      <div>
+        <span className="eyebrow">Plugin Manager</span>
+        <h1>Upload, activate, reactivate and remove WordPress plugins remotely.</h1>
+        <p>Manage plugins through the secure Remote Bridge API key. The bridge plugin protects itself so the dashboard connection cannot accidentally remove its own access.</p>
+        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={()=>loadPlugins()}>{busy?'Working...':'Load plugins'}</button><button className="btn glow" disabled={!siteId||busy} onClick={uploadPlugin}>Upload plugin ZIP</button></div>
+      </div>
+      <div className="selected-site plugin-selected">
+        <label>WordPress site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">Select site</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
+        {selected && <><b>{selected.name}</b><span>{selected.url}</span><small>Bridge key saved: {selected.apiKeySet?'yes':'no'}</small></>}
+      </div>
+    </section>
+
+    <div className="kpi-grid plugin-kpis">
+      <div className="metric"><span>Total plugins</span><strong>{data?.count ?? '-'}</strong><small>remote WordPress</small></div>
+      <div className="metric"><span>Active</span><strong>{data?.activeCount ?? '-'}</strong><small>currently enabled</small></div>
+      <div className="metric"><span>Inactive</span><strong>{data?.inactiveCount ?? '-'}</strong><small>available to activate</small></div>
+      <div className="metric"><span>Updates</span><strong>{updates ?? '-'}</strong><small>WordPress update check</small></div>
+    </div>
+
+    <div className="grid two plugin-grid">
+      <div className="card">
+        <div className="card-head"><div><h2>Upload plugin ZIP</h2><p>Install a WordPress plugin ZIP from your computer. Keep “activate after upload” on when replacing/adding the bridge or SEM SEO BLOGER plugin.</p></div></div>
+        <input className="file-input" type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={e=>setFile(e.target.files?.[0] || null)} />
+        {file && <div className="upload-file"><b>{file.name}</b><span>{(file.size/1024/1024).toFixed(2)} MB</span></div>}
+        <label className="inline-check"><input type="checkbox" checked={activateAfter} onChange={e=>setActivateAfter(e.target.checked)}/> Activate after upload</label>
+        <div className="right"><button className="btn primary" disabled={!siteId||!file||busy} onClick={uploadPlugin}>{busy?'Uploading...':'Upload / Install'}</button></div>
+      </div>
+      <div className="card">
+        <div className="card-head"><div><h2>Safety rules</h2><p>High-risk operations are blocked or confirmed before running.</p></div></div>
+        <ul className="checklist">
+          <li>Remote Bridge plugin cannot deactivate or delete itself.</li>
+          <li>Delete action deactivates first only after dashboard confirmation.</li>
+          <li>ZIP upload accepts valid WordPress plugin archives only.</li>
+          <li>Every plugin action is written into Reliability Logs.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div className="card">
+      <div className="card-head"><div><h2>Installed plugins</h2><p>Search and manage all plugins detected by WordPress.</p></div><input className="compact-input" placeholder="Search plugin" value={query} onChange={e=>setQuery(e.target.value)}/></div>
+      <div className="table-wrap plugin-table"><table><thead><tr><th>Plugin</th><th>Status</th><th>Version</th><th>Update</th><th>File</th><th>Actions</th></tr></thead><tbody>{plugins.map(p=><tr key={p.plugin}>
+        <td><strong>{p.name}</strong><div className="small">{p.description || p.author || '-'}</div>{p.protected && <span className="tiny">Bridge protected</span>}</td>
+        <td><span className={'badge '+(p.active?'success':'neutral')}>{p.active?'Active':'Inactive'}</span></td>
+        <td>{p.version || '-'}</td>
+        <td>{p.updateAvailable ? <span className="badge neutral">{p.updateVersion || 'Available'}</span> : <span className="small">-</span>}</td>
+        <td className="small log-message">{p.plugin}</td>
+        <td><div className="action-stack plugin-actions">
+          {!p.active && <button className="btn primary" disabled={busy} onClick={()=>runAction(p,'activate')}>Activate</button>}
+          {p.active && <button className="btn" disabled={busy||p.protected} onClick={()=>runAction(p,'deactivate')}>Deactivate</button>}
+          {!p.protected && <button className="btn glow" disabled={busy} onClick={()=>runAction(p,'reactivate')}>Reactivate</button>}
+          {!p.protected && <button className="btn danger" disabled={busy} onClick={()=>runAction(p,'delete')}>Remove</button>}
+        </div></td>
+      </tr>)}</tbody></table></div>
+      {!plugins.length && <p className="muted empty-state">Select a site and click Load plugins.</p>}
+    </div>
+  </div>
+}
+
 function Logs({notify}){
   const [logs,setLogs]=useState([])
   const [filter,set]=useState({siteId:'',status:'',action:''})
@@ -789,7 +919,7 @@ function Logs({notify}){
   useEffect(()=>{ load() },[filter.status, filter.action])
   return <div className="card">
     <div className="card-head"><div><h2>Execution logs</h2><p>Use logs to catch bridge, queue, Gemini, or WordPress errors fast.</p></div><button className="btn" onClick={load}>Refresh</button></div>
-    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option><option value="prompt">prompt</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
+    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option><option value="prompt">prompt</option><option value="plugins">plugins</option><option value="plugin-upload">plugin-upload</option><option value="plugin-activate">plugin-activate</option><option value="plugin-deactivate">plugin-deactivate</option><option value="plugin-reactivate">plugin-reactivate</option><option value="plugin-delete">plugin-delete</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
     <div className="table-wrap"><table><thead><tr><th>When</th><th>Site</th><th>Action</th><th>Status</th><th>Message</th></tr></thead><tbody>{logs.map(l=><tr key={l._id}><td><small>{new Date(l.createdAt).toLocaleString()}</small></td><td className="small">{l.siteId}</td><td>{l.action}</td><td><span className={'badge '+(l.status==='success'?'success':l.status==='skipped'?'neutral':'error')}>{l.status}</span></td><td className="small log-message">{l.message}</td></tr>)}</tbody></table></div>
   </div>
 }
@@ -802,15 +932,15 @@ function App(){
   const [toast,setToast]=useState(null)
   const notify=(message,type='success')=>setToast({message,type})
   const {sites,loading,refresh}=useSites(notify)
-  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='keys'?'API Keys':'Logs'
+  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='plugins'?'Plugin Manager':tab==='keys'?'API Keys':'Logs'
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v9</b><small>CSV → Gemini → WordPress</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v10</b><small>CSV → Gemini → WP Plugins</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v9 Final • Prompt Studio + CSV Sync + API Keys + History</footer>
+      <footer>v10 Final • Plugin Manager + Prompt Studio + CSV Sync</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'}</span><h1>{title}</h1></div><button className="btn" onClick={refresh}>Refresh sites</button></header>
@@ -820,6 +950,7 @@ function App(){
         {tab==='queue' && <Queue sites={sites} notify={notify}/>} 
         {tab==='prompt' && <PromptStudio sites={sites} notify={notify}/>} 
         {tab==='history' && <BlogHistory sites={sites} notify={notify}/>} 
+        {tab==='plugins' && <PluginManager sites={sites} notify={notify}/>} 
         {tab==='keys' && <ApiKeys sites={sites} refresh={refresh} notify={notify}/>} 
         {tab==='logs' && <Logs notify={notify}/>} 
       </div>

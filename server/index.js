@@ -35,7 +35,7 @@ app.use(cors({
 }));
 
 app.use(rateLimit({ windowMs: 60_000, max: Number(process.env.RATE_LIMIT_PER_MIN || 240), standardHeaders: true, legacyHeaders: false }));
-app.use(express.json({ limit: process.env.JSON_LIMIT || '4mb' }));
+app.use(express.json({ limit: process.env.JSON_LIMIT || '64mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 const ADMIN_KEY = process.env.API_KEY || process.env.ADMIN_KEY || '';
@@ -68,7 +68,7 @@ app.use('/api/history', historyRouter);
 function healthPayload(){
   return {
     ok:true,
-    appVersion:'v9-prompt-studio-final',
+    appVersion:'v10-plugin-manager-final',
     manualOnly: MANUAL_ONLY,
     nodeEnv: process.env.NODE_ENV || 'development',
     serverTime: new Date().toISOString(),
@@ -83,7 +83,7 @@ app.get('/api/healthz', (_req,res)=> res.json(healthPayload()));
 app.use('/api', (req, res) => {
   res.status(404).json({
     error: `API route not found: ${req.method} ${req.originalUrl}`,
-    appVersion: 'v9-prompt-studio-final',
+    appVersion: 'v10-plugin-manager-final',
     hint: 'If you expected this route, the old Node process may still be running. Restart /opt/autoblog/server.'
   });
 });
