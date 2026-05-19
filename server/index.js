@@ -19,8 +19,11 @@ import { defineJobs } from './lib/jobs.js';
 import { parseBoolean } from './lib/utils.js';
 import { authRouter, requireDashboardAuth } from './lib/auth.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, tenantMiddleware } from './lib/tenants.js';
+import { currentInstanceSlug, isChildInstance, proxyToClientInstance, startAllClientInstances } from './lib/instances.js';
 
-const APP_VERSION = 'v12-multi-client-isolated-db';
+const APP_VERSION = 'v13-fresh-client-instances';
+const INSTANCE_CHILD = isChildInstance();
+const INSTANCE_SLUG = currentInstanceSlug();
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -58,7 +61,9 @@ function healthPayload(req){
   return {
     ok:true,
     appVersion: APP_VERSION,
-    tenantSlug: req?.tenantSlug || DEFAULT_TENANT,
+    tenantSlug: INSTANCE_CHILD ? INSTANCE_SLUG : (req?.tenantSlug || DEFAULT_TENANT),
+    instanceMode: INSTANCE_CHILD ? 'child-dedicated-backend' : 'main-router-backend',
+    instanceSlug: INSTANCE_SLUG,
     tenantDatabaseName: req?.tenantDatabaseName || mongoose.connection.name,
     manualOnly: MANUAL_ONLY,
     nodeEnv: process.env.NODE_ENV || 'development',
@@ -87,7 +92,11 @@ function mountApi(prefix, tenantGetter){
   router.use((req, res, next) => requireDashboardAuth(req, res, next));
   router.use(adminKeyGuard);
 
-  router.use('/clients', clientsRouter);
+  if (!INSTANCE_CHILD) {
+    router.use('/clients', clientsRouter);
+  } else {
+    router.use('/clients', (_req, res) => res.status(403).json({ error: 'Client builder is available only in the main dashboard. This is a fresh client backend instance.', appVersion: APP_VERSION, instanceSlug: INSTANCE_SLUG }));
+  }
   router.use('/sites', (req,_res,next)=>{ req.agenda = agenda; next(); }, sitesRouter);
   router.use('/jobs',  (req,_res,next)=>{ req.agenda = agenda; next(); }, jobsRouter);
   router.use('/logs', logsRouter);
@@ -106,8 +115,7 @@ function mountApi(prefix, tenantGetter){
   app.use(prefix, router);
 }
 
-// IMPORTANT: mount tenant API before default /api, otherwise /api/t/:tenant is swallowed by /api.
-mountApi('/api/t/:tenant', req => req.params.tenant);
+// v13 uses fresh backend instances. Root uses /api; client URLs use /client/api and are reverse-proxied to their own Node process.
 mountApi('/api', () => DEFAULT_TENANT);
 
 app.get('/healthz', (_req,res)=> res.json(healthPayload()));
@@ -115,6 +123,10 @@ app.get('/healthz', (_req,res)=> res.json(healthPayload()));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const clientDist = path.join(__dirname, '../client/dist');
+
+// In the main dashboard process only, route /client-slug/* to that client's dedicated backend process.
+app.use(proxyToClientInstance);
+
 app.use('/', express.static(clientDist));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
@@ -128,7 +140,14 @@ app.use((err, _req, res, _next) => {
 });
 
 await agenda.start();
-const server = app.listen(PORT, ()=> console.log('[api] listening on', PORT, 'version=', APP_VERSION, 'manualOnly=', MANUAL_ONLY));
+const server = app.listen(PORT, async ()=> {
+  console.log('[api] listening on', PORT, 'version=', APP_VERSION, 'instanceChild=', INSTANCE_CHILD, 'instanceSlug=', INSTANCE_SLUG, 'manualOnly=', MANUAL_ONLY);
+  if (!INSTANCE_CHILD) {
+    const started = await startAllClientInstances().catch(err => ({ error: err.message }));
+    if (Array.isArray(started) && started.length) console.log('[instances] auto-start results', started);
+    else if (started?.error) console.error('[instances] auto-start error', started.error);
+  }
+});
 
 async function shutdown(signal){
   console.log(`[api] ${signal} received, shutting down...`);

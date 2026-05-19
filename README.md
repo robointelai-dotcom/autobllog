@@ -1,39 +1,55 @@
-# AutoBlog Remote Controller Pro v12 — Multi Client Isolated DB
+# AutoBlog Pro v13 - Fresh Client Instances
 
-This version adds dashboard lock plus multi-client app URLs.
+This release fixes the v12 limitation where client URLs used the same backend process with isolated tenant databases.
 
-## New feature
+v13 creates a fresh backend app instance for every client page name:
 
-Create a client page name such as `global1` from the **Clients** tab.
+- `/` = main dashboard backend on port `4000`
+- `/global1/` = dedicated Node backend process on port `4100+`
+- Every client has its own Mongo database
+- Every client has its own dashboard username/password file
+- Every client has its own logs and process status
+- Main app only works as a lightweight router/proxy to each client backend
 
-Example:
+Default temporary login for main and every new client:
 
-- Main app: `https://domaincontroller.in/`
-- Client app: `https://domaincontroller.in/global1/`
+```txt
+admin
+admin@2020
+```
 
-Every client app is the same full dashboard, but with isolated data:
+After first login, go to Security and change the password.
 
-- Separate Mongo database
-- Separate sites list
-- Separate queue/log/history records
-- Separate schedules
-- Separate dashboard username/password file
-- Same optimized codebase, so no heavy full-file duplication and no performance drop
+## Health checks
 
-## Default login
+Main:
 
-For root and every newly created client app:
+```bash
+curl -s https://domaincontroller.in/api/healthz
+```
 
-- User name: `admin`
-- Password: `admin@2020`
+Client:
 
-Open **Security** and change it after first login.
+```bash
+curl -s https://domaincontroller.in/global1/api/healthz
+```
 
-## Important paths
+Expected app version:
 
-- Root auth file: `server/data/dashboard-auth.json`
-- Client auth file: `server/data/tenants/<slug>/dashboard-auth.json`
-- Root DB: your `MONGO_URI` database
-- Client DB: `<prefix>_client_<slug>`
+```json
+"appVersion":"v13-fresh-client-instances"
+```
 
-Do not commit `server/data` to GitHub.
+## Client instance logs
+
+```bash
+tail -100 /opt/autoblog-clients/global1/logs/server.log
+```
+
+## Important
+
+Do not use the old v12 `/api/t/global1/...` route. v13 client API is:
+
+```txt
+/global1/api/...
+```

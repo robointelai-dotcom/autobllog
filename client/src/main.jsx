@@ -13,10 +13,10 @@ function detectClientSlug(){
 }
 const CLIENT_SLUG = detectClientSlug()
 const CLIENT_BASE_PATH = CLIENT_SLUG === 'main' ? '' : `/${CLIENT_SLUG}`
-const API_PREFIX = CLIENT_SLUG === 'main' ? '/api' : `/api/t/${CLIENT_SLUG}`
+const API_PREFIX = CLIENT_SLUG === 'main' ? '/api' : `${CLIENT_BASE_PATH}/api`
 function apiPath(path){
   const clean = String(path || '')
-  if (clean.startsWith('/api/')) return clean
+  if (clean.startsWith('/api/')) return API_PREFIX + clean.slice(4)
   return API_PREFIX + (clean.startsWith('/') ? clean : `/${clean}`)
 }
 function appUrl(slug='main'){
@@ -335,16 +335,16 @@ function ClientApps({notify}){
   return <div className="clients-page">
     <section className="hero">
       <div>
-        <span className="eyebrow">Multi Client App Builder</span>
-        <h1>Create a full new dashboard URL for every client.</h1>
-        <p>Add a page name like <b>global1</b>. The system creates <b>/global1</b> as a complete dashboard with separate login, separate sites, separate logs, separate schedules, and a separate Mongo database.</p>
+        <span className="eyebrow">Fresh Client Instance Builder</span>
+        <h1>Create a fresh new app instance for every client.</h1>
+        <p>Add a page name like <b>global1</b>. The system creates <b>/global1</b> as a fresh dashboard with its own Node backend process, own port, own login, own sites, own logs, own schedules, and own Mongo database.</p>
         <div className="hero-actions"><a className="btn primary" href={appUrl('global1')} target="_blank" rel="noreferrer">Example /global1</a><button className="btn" onClick={load}>Refresh clients</button></div>
       </div>
       <div className="metric"><span>Current app</span><strong>{CLIENT_SLUG}</strong><small>{CLIENT_SLUG==='main'?'Root database':'Isolated client database'}</small></div>
     </section>
     <div className="grid two">
       <form className="card" onSubmit={create}>
-        <div className="card-head"><div><h2>Add new client page</h2><p>This creates a new isolated app URL without duplicating heavy files.</p></div></div>
+        <div className="card-head"><div><h2>Add new client page</h2><p>This creates a fresh backend instance and private database for the client.</p></div></div>
         <div className="form-grid">
           <label>Page name / slug<input required value={form.slug} onChange={e=>setForm({...form,slug:cleanSlug(e.target.value)})} placeholder="global1" /></label>
           <label>Client display name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Global Client 1" /></label>
@@ -353,24 +353,25 @@ function ClientApps({notify}){
         <div className="right"><button className="btn primary" disabled={busy}>{busy?'Creating...':'Create Client App'}</button></div>
       </form>
       <div className="card">
-        <div className="card-head"><div><h2>How isolation works</h2><p>Good performance: one codebase, many isolated client databases.</p></div></div>
+        <div className="card-head"><div><h2>How isolation works</h2><p>Good performance: main app only routes traffic; every client runs its own backend process and DB.</p></div></div>
         <ul className="checklist">
           <li><b>/</b> keeps your main dashboard and current data.</li>
-          <li><b>/global1</b>, <b>/client2</b> etc. each get a new Mongo database.</li>
+          <li><b>/global1</b>, <b>/client2</b> etc. each get a separate Node backend process and Mongo database.</li>
           <li>Each client starts with temporary login <b>admin / admin@2020</b>.</li>
           <li>Each client has its own Security tab to change username/password.</li>
-          <li>No full file-copy needed per client, so server performance stays stable.</li>
+          <li>No shared dashboard data. The main app only works as a lightweight router to the client instance.</li>
         </ul>
       </div>
     </div>
     <div className="card">
-      <div className="card-head"><div><h2>Client apps</h2><p>Open any client URL and manage it as a separate application.</p></div><button className="btn" onClick={load}>Refresh</button></div>
-      <div className="table-wrap"><table><thead><tr><th>Client</th><th>URL</th><th>Database</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(c=><tr key={c.slug}>
+      <div className="card-head"><div><h2>Client apps</h2><p>Open any client URL and manage it as a separate backend application.</p></div><button className="btn" onClick={load}>Refresh</button></div>
+      <div className="table-wrap"><table><thead><tr><th>Client</th><th>URL</th><th>Database</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(c=><tr key={c.slug}>
         <td><strong>{c.name}</strong><div className="small">/{c.slug}</div></td>
         <td className="small"><a href={c.url} target="_blank" rel="noreferrer">{c.url}</a></td>
         <td className="small log-message">{c.databaseName}</td>
-        <td><span className={'badge '+(c.enabled?'success':'neutral')}>{c.enabled?'Active':'Disabled'}</span></td>
-        <td><div className="action-stack"><a className="btn primary" href={c.url} target="_blank" rel="noreferrer">Open</a><button className="btn" onClick={()=>copyUrl(c.url)}>Copy URL</button></div></td>
+        <td className="small">{c.port || '-'}</td>
+        <td><span className={'badge '+(c.processStatus==='running'?'success':c.enabled?'neutral':'neutral')}>{c.processStatus || (c.enabled?'Active':'Disabled')}</span></td>
+        <td><div className="action-stack"><a className="btn primary" href={c.url} target="_blank" rel="noreferrer">Open</a><button className="btn" onClick={()=>copyUrl(c.url)}>Copy URL</button><button className="btn" onClick={async()=>{try{await req('/clients/'+c.slug+'/restart',{method:'POST'}); notify('Client restarted.', 'success'); await load()}catch(e){notify(e.message,'error')}}}>Restart</button></div></td>
       </tr>)}</tbody></table></div>
       {!items.length && <p className="muted empty-state">No clients yet. Add your first client page name above.</p>}
     </div>
@@ -405,7 +406,7 @@ function Dashboard({sites,onTab}){
         <h1>World-class WordPress automation control room.</h1>
         <p>Control CSV auto updates, Gemini API keys, Prompt Studio, WordPress plugin upload/activation/removal, post history, queue health, schedules and bridge checks from one premium dashboard.</p>
         <div className="hero-actions">
-          <button className="btn primary" onClick={()=>onTab('clients')}>Client Apps</button><button className="btn" onClick={()=>onTab('sites')}>Manage sites</button>
+          {CLIENT_SLUG==='main' && <button className="btn primary" onClick={()=>onTab('clients')}>Client Apps</button>}<button className="btn" onClick={()=>onTab('sites')}>Manage sites</button>
           <button className="btn" onClick={()=>onTab('queue')}>Smart CSV sync</button>
           <button className="btn glow" onClick={()=>onTab('prompt')}>Prompt Studio</button>
           <button className="btn" onClick={()=>onTab('keys')}>Gemini API keys</button>
@@ -416,7 +417,7 @@ function Dashboard({sites,onTab}){
       <KPIs sites={sites}/>
     </section>
     <div className="command-grid">
-      <button className="command-card" onClick={()=>onTab('clients')}><span>00</span><b>Client App Builder</b><small>Create /global1, /client2 with isolated DB.</small></button>
+      {CLIENT_SLUG==='main' && <button className="command-card" onClick={()=>onTab('clients')}><span>00</span><b>Client App Builder</b><small>Create /global1, /client2 as fresh backend instances.</small></button>}
       <button className="command-card" onClick={()=>onTab('queue')}><span>01</span><b>Smart CSV Auto Update</b><small>Update changed rows, add new keywords and keep WordPress queue verified.</small></button>
       <button className="command-card" onClick={()=>onTab('keys')}><span>02</span><b>Gemini Key Manager</b><small>Change, test, save and mask Gemini API settings from the dashboard.</small></button>
       <button className="command-card" onClick={()=>onTab('prompt')}><span>03</span><b>Prompt Studio</b><small>Edit Gemini article prompts with variables, preview, save and reset controls.</small></button>
@@ -1106,11 +1107,11 @@ function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v12</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v13</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button>{CLIENT_SLUG==='main' && <button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button>}<button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v12 Multi Client • Isolated DB + Dashboard Lock</footer>
+      <footer>v13 Fresh Client Instances • Separate backend + DB</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>

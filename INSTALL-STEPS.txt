@@ -1,14 +1,16 @@
-AutoBlog v12 Multi Client install
+AutoBlog Pro v13 Fresh Client Instances
 
-1. Push this package to GitHub.
-2. Pull on server.
-3. Reinstall server and client dependencies.
-4. Build client.
-5. Restart Node backend and nginx.
-6. Login at https://domaincontroller.in/
-7. Open Clients tab.
-8. Add page name: global1
-9. Open https://domaincontroller.in/global1/
-10. Login with admin / admin@2020 and change password in Security.
+1. Deploy code to /opt/autoblog.
+2. Reinstall server and client dependencies.
+3. Build client.
+4. Restart main backend.
+5. Open https://domaincontroller.in/?v=13
+6. Login: admin / admin@2020
+7. Clients -> add page name global1 -> Create Client App.
+8. Open https://domaincontroller.in/global1/?v=13
+9. Login to client: admin / admin@2020
+10. Security -> change that client's password.
 
-No new nginx location is needed if nginx already proxies all unknown paths to the Node app or serves this Node app for the domain. The React SPA fallback handles /global1/.
+v13 difference:
+- main site and client site no longer share the same backend process.
+- each client gets its own Node process, port, Mongo DB, auth file, and logs.
