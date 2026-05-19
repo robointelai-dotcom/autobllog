@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import mongoose from 'mongoose';
 import ClientApp from '../models/ClientApp.js';
 import { normalizeTenantSlug, tenantDbName } from './tenants.js';
@@ -92,11 +92,65 @@ export async function checkInstanceHealth(port){
   });
 }
 
-export async function startClientInstance(client){
+
+function readPid(slug){
+  const pidFile = path.join(instanceDir(slug), 'run.pid');
+  try {
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch { return null; }
+}
+
+function removePidFile(slug){
+  try { fs.rmSync(path.join(instanceDir(slug), 'run.pid'), { force:true }); } catch {}
+}
+
+async function waitForPortClosed(port, tries = 12){
+  for (let i=0; i<tries; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    const health = await checkInstanceHealth(port);
+    if (!health.ok) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise(r => setTimeout(r, 350));
+  }
+  return false;
+}
+
+export async function stopClientInstance(client){
+  const slug = normalizeTenantSlug(client.slug);
+  if (slug === 'main') return { ok:false, error:'Main dashboard cannot be stopped here.' };
+  const port = Number(client.port || 0);
+  const pid = Number(client.processPid || readPid(slug) || 0);
+  const killed = [];
+
+  if (pid) {
+    try { process.kill(-pid, 'SIGTERM'); killed.push(`group:${pid}`); } catch {}
+    try { process.kill(pid, 'SIGTERM'); killed.push(`pid:${pid}`); } catch {}
+  }
+
+  if (port) {
+    await waitForPortClosed(port, 8);
+    const stillOpen = await checkInstanceHealth(port);
+    if (stillOpen.ok) {
+      try { spawnSync('fuser', ['-k', `${port}/tcp`], { stdio:'ignore' }); killed.push(`port:${port}`); } catch {}
+      await waitForPortClosed(port, 8);
+    }
+  }
+
+  removePidFile(slug);
+  await ClientApp.updateOne({ slug }, { $set: { processPid:null, processStatus:'stopped' } }).catch(()=>{});
+  return { ok:true, slug, port: port || null, pid: pid || null, killed };
+}
+
+export async function startClientInstance(client, options = {}){
   const slug = normalizeTenantSlug(client.slug);
   const port = Number(client.port);
   if (!port) throw new Error(`Client ${slug} has no assigned port`);
   if (isChildInstance()) throw new Error('Child instances cannot start other instances');
+
+  if (options.force) {
+    await stopClientInstance(client);
+  }
 
   const already = await checkInstanceHealth(port);
   if (already.ok) {

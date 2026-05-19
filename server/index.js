@@ -21,7 +21,7 @@ import { authRouter, requireDashboardAuth } from './lib/auth.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, tenantMiddleware } from './lib/tenants.js';
 import { currentInstanceSlug, isChildInstance, proxyToClientInstance, startAllClientInstances } from './lib/instances.js';
 
-const APP_VERSION = 'v13-fresh-client-instances';
+const APP_VERSION = 'v14-client-delete-proxy-fix';
 const INSTANCE_CHILD = isChildInstance();
 const INSTANCE_SLUG = currentInstanceSlug();
 const app = express();
@@ -115,7 +115,7 @@ function mountApi(prefix, tenantGetter){
   app.use(prefix, router);
 }
 
-// v13 uses fresh backend instances. Root uses /api; client URLs use /client/api and are reverse-proxied to their own Node process.
+// v14 uses fresh backend instances. Root uses /api; client URLs use /client/api and are reverse-proxied to their own Node process.
 mountApi('/api', () => DEFAULT_TENANT);
 
 app.get('/healthz', (_req,res)=> res.json(healthPayload()));

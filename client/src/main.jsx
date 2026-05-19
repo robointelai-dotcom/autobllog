@@ -332,6 +332,18 @@ function ClientApps({notify}){
     try { await navigator.clipboard.writeText(url); notify('Client URL copied.', 'success') }
     catch { notify(url, 'success') }
   }
+  async function deleteClient(c){
+    if(!c || c.slug === 'main') return notify('Main dashboard cannot be deleted.', 'error')
+    const first = window.confirm(`Delete client /${c.slug}?\n\nThis stops its backend, removes it from the main dashboard, deletes runtime files, and attempts to drop its client database. This cannot be undone.`)
+    if(!first) return
+    const typed = window.prompt(`Type DELETE ${c.slug} to confirm permanent deletion:`)
+    if(typed !== `DELETE ${c.slug}`) return notify('Delete cancelled. Confirmation text did not match.', 'error')
+    try{
+      await req('/clients/'+c.slug,{method:'DELETE'})
+      notify(`Client /${c.slug} deleted.`, 'success')
+      await load()
+    }catch(e){ notify(e.message, 'error') }
+  }
   return <div className="clients-page">
     <section className="hero">
       <div>
@@ -364,14 +376,14 @@ function ClientApps({notify}){
       </div>
     </div>
     <div className="card">
-      <div className="card-head"><div><h2>Client apps</h2><p>Open any client URL and manage it as a separate backend application.</p></div><button className="btn" onClick={load}>Refresh</button></div>
+      <div className="card-head"><div><h2>Client apps</h2><p>Open, restart, or delete client URLs. Main Dashboard is protected and cannot be deleted.</p></div><button className="btn" onClick={load}>Refresh</button></div>
       <div className="table-wrap"><table><thead><tr><th>Client</th><th>URL</th><th>Database</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(c=><tr key={c.slug}>
         <td><strong>{c.name}</strong><div className="small">/{c.slug}</div></td>
         <td className="small"><a href={c.url} target="_blank" rel="noreferrer">{c.url}</a></td>
         <td className="small log-message">{c.databaseName}</td>
         <td className="small">{c.port || '-'}</td>
         <td><span className={'badge '+(c.processStatus==='running'?'success':c.enabled?'neutral':'neutral')}>{c.processStatus || (c.enabled?'Active':'Disabled')}</span></td>
-        <td><div className="action-stack"><a className="btn primary" href={c.url} target="_blank" rel="noreferrer">Open</a><button className="btn" onClick={()=>copyUrl(c.url)}>Copy URL</button><button className="btn" onClick={async()=>{try{await req('/clients/'+c.slug+'/restart',{method:'POST'}); notify('Client restarted.', 'success'); await load()}catch(e){notify(e.message,'error')}}}>Restart</button></div></td>
+        <td><div className="action-stack"><a className="btn primary" href={c.url} target="_blank" rel="noreferrer">Open</a><button className="btn" onClick={()=>copyUrl(c.url)}>Copy URL</button>{c.slug !== 'main' && <button className="btn" onClick={async()=>{try{await req('/clients/'+c.slug+'/restart',{method:'POST'}); notify('Client restarted with a fresh backend process.', 'success'); await load()}catch(e){notify(e.message,'error')}}}>Restart</button>}{c.slug !== 'main' && <button className="btn danger" onClick={()=>deleteClient(c)}>Delete</button>}</div></td>
       </tr>)}</tbody></table></div>
       {!items.length && <p className="muted empty-state">No clients yet. Add your first client page name above.</p>}
     </div>
@@ -1107,11 +1119,11 @@ function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v13</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v14</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
       <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button>{CLIENT_SLUG==='main' && <button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button>}<button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v13 Fresh Client Instances • Separate backend + DB</footer>
+      <footer>v14 Client Delete + Proxy Fix • Separate backend + DB</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>

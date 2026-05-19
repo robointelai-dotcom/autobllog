@@ -1,11 +1,18 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import mongoose from 'mongoose';
+import { fileURLToPath } from 'url';
 import ClientApp from '../models/ClientApp.js';
 import { asyncHandler, cleanString } from '../lib/utils.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, normalizeTenantSlug } from '../lib/tenants.js';
 import { initializeTenantAuth } from '../lib/auth.js';
-import { checkInstanceHealth, clientPublicUrl, instanceDbName, instanceDir, pickClientPort, startClientInstance } from '../lib/instances.js';
+import { checkInstanceHealth, clientPublicUrl, instanceDbName, instanceDir, pickClientPort, startClientInstance, stopClientInstance } from '../lib/instances.js';
 
 const router = express.Router();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SERVER_DATA = path.resolve(__dirname, '../data');
 
 async function row(req, item){
   const health = item.port ? await checkInstanceHealth(item.port) : null;
@@ -88,7 +95,7 @@ router.post('/:slug/restart', asyncHandler(async (req, res) => {
   if (slug === DEFAULT_TENANT) return res.status(400).json({ error: 'Root app cannot be restarted from here.' });
   const client = await ClientApp.findOne({ slug, enabled:true }).lean();
   if (!client) return res.status(404).json({ error: 'Client app not found' });
-  const started = await startClientInstance(client);
+  const started = await startClientInstance(client, { force:true });
   const updated = await ClientApp.findOne({ slug }).lean();
   res.json({ ok: !!started.ok, client: await row(req, updated), started });
 }));
@@ -102,6 +109,44 @@ router.put('/:slug', asyncHandler(async (req, res) => {
   const updated = await ClientApp.findOneAndUpdate({ slug }, { $set: patch }, { new: true }).lean();
   if (!updated) return res.status(404).json({ error: 'Client app not found' });
   res.json({ ok: true, client: await row(req, updated) });
+}));
+
+async function dropClientDatabase(databaseName){
+  const db = String(databaseName || '');
+  const mainDb = mongoose.connection?.name || '';
+  if (!db || db === mainDb || !/_client_/.test(db)) return { ok:false, skipped:true, reason:'Database name is not a safe client database name.' };
+  await mongoose.connection.client.db(db).dropDatabase();
+  return { ok:true, databaseName:db };
+}
+
+router.delete('/:slug', asyncHandler(async (req, res) => {
+  const slug = normalizeTenantSlug(req.params.slug);
+  if (slug === DEFAULT_TENANT) return res.status(400).json({ error: 'Main dashboard cannot be deleted.' });
+  const client = await ClientApp.findOne({ slug }).lean();
+  if (!client) return res.status(404).json({ error: 'Client app not found' });
+
+  const stopped = await stopClientInstance(client);
+  const droppedDb = await dropClientDatabase(client.databaseName).catch(err => ({ ok:false, error:err.message }));
+
+  const runtimeAuthDir = path.join(SERVER_DATA, 'instances', slug);
+  const runtimeInstanceDir = instanceDir(slug);
+  const removedPaths = [];
+  for (const dir of [runtimeAuthDir, runtimeInstanceDir]) {
+    try {
+      fs.rmSync(dir, { recursive:true, force:true });
+      removedPaths.push(dir);
+    } catch {}
+  }
+
+  await ClientApp.deleteOne({ slug });
+  res.json({
+    ok:true,
+    message:`Client /${slug} deleted. Its backend process was stopped, dashboard record removed, and client database cleanup was attempted.`,
+    slug,
+    stopped,
+    droppedDb,
+    removedPaths
+  });
 }));
 
 export default router;

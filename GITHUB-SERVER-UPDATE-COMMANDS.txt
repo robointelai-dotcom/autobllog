@@ -1,12 +1,12 @@
 GitHub update from Kali
-
+-----------------------
 cd ~/Music
 
-rm -rf autoblog-v13 autobllog-github
-mkdir -p autoblog-v13
+rm -rf autoblog-v14 autobllog-github
+mkdir -p autoblog-v14
 
-unzip -o autoblog-complete-v13-fresh-client-instances-package.zip -d autoblog-v13
-unzip -o autoblog-v13/package_v13_fresh_instances/autobllog-main-v13-fresh-client-instances.zip -d autoblog-v13/dashboard
+unzip -o autoblog-complete-v14-client-delete-proxy-fix-package.zip -d autoblog-v14
+unzip -o autoblog-v14/package_v14_client_delete_proxy_fix/autobllog-main-v14-client-delete-proxy-fix.zip -d autoblog-v14/dashboard
 
 git clone https://github.com/robointelai-dotcom/autobllog.git autobllog-github
 
@@ -20,26 +20,25 @@ rsync -av --delete \
   --exclude='node_modules' \
   --exclude='client/node_modules' \
   --exclude='server/node_modules' \
-  autoblog-v13/dashboard/ \
+  autoblog-v14/dashboard/ \
   autobllog-github/
 
 cd autobllog-github
 mkdir -p release-plugins
 
-cp ~/Music/autoblog-v13/package_v13_fresh_instances/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
-cp ~/Music/autoblog-v13/package_v13_fresh_instances/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
+cp ~/Music/autoblog-v14/package_v14_client_delete_proxy_fix/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
+cp ~/Music/autoblog-v14/package_v14_client_delete_proxy_fix/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
 
-grep -R "Fresh Client Instance Builder" client/src client/dist 2>/dev/null || echo "CLIENT FEATURE MISSING"
-grep -n "v13-fresh-client-instances" server/index.js || echo "SERVER VERSION MISSING"
+grep -R "Delete" client/src/main.jsx | head
+grep -n "v14-client-delete-proxy-fix" server/index.js
 ls -lah server/lib/instances.js server/routes/clients.js
 
 git add .
-git commit -m "Update AutoBlog Pro v13 fresh client instances" || echo "No new changes to commit"
+git commit -m "Update AutoBlog Pro v14 client delete and proxy fix" || echo "No new changes to commit"
 git push origin main
 
-
 Server update on VPS
-
+--------------------
 ssh root@YOUR_SERVER_IP
 
 cd /opt/autoblog
@@ -50,9 +49,9 @@ cp -a /opt/autoblog /opt/autoblog-backup-$(date +%F-%H%M%S)
 git fetch origin main
 git reset --hard origin/main
 
-grep -R "Fresh Client Instance Builder" client/src client/dist 2>/dev/null || echo "CLIENT FEATURE MISSING"
-grep -n "v13-fresh-client-instances" server/index.js || echo "SERVER VERSION MISSING"
-ls -lah server/lib/instances.js server/routes/clients.js
+grep -n "v14-client-delete-proxy-fix" server/index.js
+grep -n "router.delete('/:slug'" server/routes/clients.js
+grep -n "stopClientInstance" server/lib/instances.js
 
 source /root/.nvm/nvm.sh 2>/dev/null || true
 npm config set registry https://registry.npmjs.org/
@@ -66,11 +65,12 @@ rm -rf node_modules package-lock.json npm-shrinkwrap.json
 npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund --legacy-peer-deps --ignore-scripts
 npm run build
 
+# stop main + old child node processes
 pkill -f "node index.js" 2>/dev/null || true
 pkill -f "npm.*start" 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
-# Optional: stop old client ports if testing repeatedly
-# fuser -k 4100/tcp 4101/tcp 4102/tcp 2>/dev/null || true
+# optional: clear old client ports if stuck
+for p in $(seq 4100 4120); do fuser -k ${p}/tcp 2>/dev/null || true; done
 
 cd /opt/autoblog/server
 nohup npm start > /var/log/autoblog.log 2>&1 &
@@ -84,14 +84,28 @@ systemctl restart nginx
 
 curl -s https://domaincontroller.in/api/healthz
 
-Open:
-https://domaincontroller.in/?v=13
+Nginx white-screen fix
+----------------------
+If /global1/ or /tes/ opens blank white, your Nginx is serving static files directly and not passing /clientSlug/ to Node.
+Change Nginx so location / proxies all traffic to 127.0.0.1:4000.
+A sample file is included: NGINX-PROXY-ALL-FIX.conf
 
-Create client:
-Clients -> Page name: global1 -> Create Client App
+Quick tests
+-----------
+# login root and list clients
+rm -f /tmp/ab-cookie.txt
+curl -i -c /tmp/ab-cookie.txt -X POST https://domaincontroller.in/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin@2020"}'
 
-Test client backend:
+curl -s -b /tmp/ab-cookie.txt https://domaincontroller.in/api/clients
+
+# delete wrong client, example /tes
+curl -i -b /tmp/ab-cookie.txt -X DELETE https://domaincontroller.in/api/clients/tes
+
+# create fresh client again
+curl -i -b /tmp/ab-cookie.txt -X POST https://domaincontroller.in/api/clients \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"global1","name":"Global Client 1"}'
+
 curl -s https://domaincontroller.in/global1/api/healthz
-
-Open client:
-https://domaincontroller.in/global1/?v=13
