@@ -1,4 +1,4 @@
-# AutoBlog Pro v10 Plugin Manager Final
+# AutoBlog Pro v11 Dashboard Lock
 
 Remote Controller dashboard for WordPress SEM SEO BLOGER automation with full WordPress plugin management.
 
@@ -11,6 +11,17 @@ Remote Controller dashboard for WordPress SEM SEO BLOGER automation with full Wo
 - New Plugin Manager: upload plugin ZIP, activate, deactivate, reactivate and remove plugins
 - Remote Bridge diagnostics and secure plugin-management endpoints
 - World-class themed dashboard UI
+- Dashboard login lock with password-change screen
+
+
+## Dashboard lock
+
+Default first-login credentials:
+
+- User name: `admin`
+- Temporary password: `admin@2020`
+
+After login, open **Security** and change the user name/password. The runtime password hash is stored at `server/data/dashboard-auth.json`. Do not commit that runtime file after changing the password on the server.
 
 ## WordPress plugin install order
 
@@ -41,11 +52,11 @@ npm run build
 curl -s https://domaincontroller.in/api/healthz
 ```
 
-Expected appVersion: `v10-plugin-manager-final`.
+Expected appVersion: `v11-dashboard-lock`.
 
 ## Dashboard test after update
 
-1. Open dashboard with cache-bust, for example `https://domaincontroller.in/?v=10`.
+1. Open dashboard with cache-bust, for example `https://domaincontroller.in/?v=11`.
 2. Press Ctrl + Shift + R.
 3. API Keys -> Load remote status -> Test Gemini.
 4. Queue -> Sync CSV to WordPress.

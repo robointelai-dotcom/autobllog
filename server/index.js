@@ -16,6 +16,7 @@ import queueRouter from './routes/queue.js';
 import historyRouter from './routes/history.js';
 import { defineJobs } from './lib/jobs.js';
 import { parseBoolean } from './lib/utils.js';
+import { authRouter, requireDashboardAuth } from './lib/auth.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -38,9 +39,18 @@ app.use(rateLimit({ windowMs: 60_000, max: Number(process.env.RATE_LIMIT_PER_MIN
 app.use(express.json({ limit: process.env.JSON_LIMIT || '64mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
+app.use('/api/auth', authRouter);
+
+// Lock all dashboard API routes behind the dashboard session. /api/auth/* and
+// /api/healthz stay public so login and uptime checks work before authentication.
+app.use('/api', (req, res, next) => {
+  if (req.path === '/healthz') return next();
+  return requireDashboardAuth(req, res, next);
+});
+
 const ADMIN_KEY = process.env.API_KEY || process.env.ADMIN_KEY || '';
 app.use((req, res, next) => {
-  if (!ADMIN_KEY || req.method === 'GET' || req.method === 'OPTIONS') return next();
+  if (!ADMIN_KEY || req.method === 'GET' || req.method === 'OPTIONS' || req.path.startsWith('/api/auth/')) return next();
   const key = req.get('x-admin-key') || req.query.key || (req.body && req.body.key);
   if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
   next();
@@ -68,7 +78,7 @@ app.use('/api/history', historyRouter);
 function healthPayload(){
   return {
     ok:true,
-    appVersion:'v10-plugin-manager-final',
+    appVersion:'v11-dashboard-lock',
     manualOnly: MANUAL_ONLY,
     nodeEnv: process.env.NODE_ENV || 'development',
     serverTime: new Date().toISOString(),
@@ -83,7 +93,7 @@ app.get('/api/healthz', (_req,res)=> res.json(healthPayload()));
 app.use('/api', (req, res) => {
   res.status(404).json({
     error: `API route not found: ${req.method} ${req.originalUrl}`,
-    appVersion: 'v10-plugin-manager-final',
+    appVersion: 'v11-dashboard-lock',
     hint: 'If you expected this route, the old Node process may still be running. Restart /opt/autoblog/server.'
   });
 });

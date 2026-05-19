@@ -29,7 +29,7 @@ async function req(path, options={}){
   const headers = new Headers(options.headers || {})
   const adminKey = getAdminKey()
   if (adminKey) headers.set('x-admin-key', adminKey)
-  const r = await fetch(API+path, { ...options, headers })
+  const r = await fetch(API+path, { credentials: 'include', ...options, headers })
   const ct = r.headers.get('content-type') || ''
   const raw = await r.text().catch(()=> '')
   let payload = raw
@@ -200,6 +200,89 @@ function ThemeStudio({theme,setTheme}){
       </button>)}
     </div>
     <small>Saved in this browser. Use this to match your brand color.</small>
+  </div>
+}
+
+
+function LoginScreen({themeValue,setTheme,onLogin,notify}){
+  const [form,setForm]=useState({username:'admin',password:''})
+  const [busy,setBusy]=useState(false)
+  async function submit(e){
+    e.preventDefault()
+    setBusy(true)
+    try{
+      const data = await req('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
+      notify('Dashboard unlocked.', 'success')
+      onLogin(data.user)
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+  return <div className={"login-shell theme-"+themeValue}>
+    <div className="login-bg"></div>
+    <div className="login-panel">
+      <div className="brand login-brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro</b><small>Protected dashboard</small></div></div>
+      <form className="card login-card" onSubmit={submit}>
+        <span className="eyebrow">Dashboard Lock</span>
+        <h1>Sign in to unlock your application.</h1>
+        <p className="muted">Your WordPress automation dashboard, plugin manager, Gemini key manager, CSV queue and prompt studio stay hidden until login.</p>
+        <label>User name<input autoFocus required value={form.username} onChange={e=>setForm({...form,username:e.target.value})} placeholder="admin" autoComplete="username" /></label>
+        <label>Password<input required type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="Enter password" autoComplete="current-password" /></label>
+        <button className="btn primary login-btn" disabled={busy}>{busy?'Checking...':'Unlock Dashboard'}</button>
+        <small className="login-note">After first login, open Security and change the temporary password.</small>
+      </form>
+      <ThemeStudio theme={themeValue} setTheme={setTheme}/>
+    </div>
+  </div>
+}
+
+function SecuritySettings({user,onLogout,onChangedUser,notify}){
+  const [form,setForm]=useState({currentPassword:'',newUsername:user?.username || 'admin',newPassword:'',confirmPassword:''})
+  const [busy,setBusy]=useState(false)
+  useEffect(()=>{ setForm(f=>({...f,newUsername:user?.username || 'admin'})) },[user?.username])
+  async function save(e){
+    e.preventDefault()
+    if(form.newPassword && form.newPassword !== form.confirmPassword) return notify('New password and confirm password do not match.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:form.currentPassword,newUsername:form.newUsername,newPassword:form.newPassword})})
+      onChangedUser(data.user)
+      setForm(f=>({...f,currentPassword:'',newPassword:'',confirmPassword:'',newUsername:data.user?.username || f.newUsername}))
+      notify(data.passwordChanged ? 'Dashboard username/password updated.' : 'Dashboard username updated.', 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+  return <div className="security-page">
+    <section className="hero security-hero">
+      <div>
+        <span className="eyebrow">Security</span>
+        <h1>Dashboard lock is active.</h1>
+        <p>Only logged-in users can access dashboard API routes. Use this screen to change the temporary username/password after deployment.</p>
+        <div className="hero-actions"><button className="btn danger" onClick={onLogout}>Logout</button></div>
+      </div>
+      <div className="metric"><span>Signed in as</span><strong className="metric-date">{user?.username || '-'}</strong><small>Session protected with HttpOnly cookie</small></div>
+    </section>
+    <div className="grid two security-grid">
+      <form className="card" onSubmit={save}>
+        <div className="card-head"><div><h2>Change login details</h2><p>Enter the current password, then save a new user name and password.</p></div></div>
+        <div className="form-grid">
+          <label>Current password<input required type="password" value={form.currentPassword} onChange={e=>setForm({...form,currentPassword:e.target.value})} autoComplete="current-password" /></label>
+          <label>New user name<input required minLength="3" value={form.newUsername} onChange={e=>setForm({...form,newUsername:e.target.value})} autoComplete="username" /></label>
+          <label>New password<input type="password" minLength="8" value={form.newPassword} onChange={e=>setForm({...form,newPassword:e.target.value})} placeholder="Leave blank to keep current password" autoComplete="new-password" /></label>
+          <label>Confirm new password<input type="password" minLength="8" value={form.confirmPassword} onChange={e=>setForm({...form,confirmPassword:e.target.value})} placeholder="Repeat new password" autoComplete="new-password" /></label>
+        </div>
+        <div className="right"><button className="btn primary" disabled={busy}>{busy?'Saving...':'Save Security Settings'}</button></div>
+      </form>
+      <div className="card">
+        <div className="card-head"><div><h2>Important deploy notes</h2><p>For first deploy only, the temporary login is created automatically.</p></div></div>
+        <ul className="checklist">
+          <li>Default user name: <b>admin</b></li>
+          <li>Default temporary password: <b>admin@2020</b></li>
+          <li>Password hash is stored in <b>server/data/dashboard-auth.json</b>.</li>
+          <li>Do not commit the runtime auth file after changing the password on the server.</li>
+          <li>If you lose access, stop the server and delete that auth file to recreate the temporary login.</li>
+        </ul>
+      </div>
+    </div>
   </div>
 }
 
@@ -924,26 +1007,21 @@ function Logs({notify}){
   </div>
 }
 
-function App(){
+function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
   const [tab,setTab]=useState('dash')
-  const [themeValue,setThemeValue]=useState(()=>localStorage.getItem('ab_theme') || 'aurora')
-  const setTheme=(v)=>{ setThemeValue(v); localStorage.setItem('ab_theme', v) }
-  useEffect(()=>{ document.documentElement.setAttribute('data-theme', themeValue) },[themeValue])
-  const [toast,setToast]=useState(null)
-  const notify=(message,type='success')=>setToast({message,type})
   const {sites,loading,refresh}=useSites(notify)
-  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='plugins'?'Plugin Manager':tab==='keys'?'API Keys':'Logs'
+  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='plugins'?'Plugin Manager':tab==='security'?'Security':tab==='keys'?'API Keys':'Logs'
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v10</b><small>CSV → Gemini → WP Plugins</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v11</b><small>CSV → Gemini → WP Plugins</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v10 Final • Plugin Manager + Prompt Studio + CSV Sync</footer>
+      <footer>v11 Dashboard Lock • Plugin Manager + Prompt Studio + CSV Sync</footer>
     </aside>
     <main>
-      <header><div><span className="small">{loading?'Refreshing...':'Ready'}</span><h1>{title}</h1></div><button className="btn" onClick={refresh}>Refresh sites</button></header>
+      <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>
       <div className="wrap">
         {tab==='dash' && <Dashboard sites={sites} onTab={setTab}/>} 
         {tab==='sites' && <><AddSite onAdded={refresh} notify={notify}/><Sites sites={sites} refresh={refresh} notify={notify}/></>}
@@ -952,11 +1030,50 @@ function App(){
         {tab==='history' && <BlogHistory sites={sites} notify={notify}/>} 
         {tab==='plugins' && <PluginManager sites={sites} notify={notify}/>} 
         {tab==='keys' && <ApiKeys sites={sites} refresh={refresh} notify={notify}/>} 
+        {tab==='security' && <SecuritySettings user={user} onLogout={onLogout} onChangedUser={onChangedUser} notify={notify}/>} 
         {tab==='logs' && <Logs notify={notify}/>} 
       </div>
     </main>
-    <Toast toast={toast} onClose={()=>setToast(null)}/>
   </div>
+}
+
+function App(){
+  const [themeValue,setThemeValue]=useState(()=>localStorage.getItem('ab_theme') || 'aurora')
+  const setTheme=(v)=>{ setThemeValue(v); localStorage.setItem('ab_theme', v) }
+  useEffect(()=>{ document.documentElement.setAttribute('data-theme', themeValue) },[themeValue])
+  const [toast,setToast]=useState(null)
+  const notify=(message,type='success')=>setToast({message,type})
+  const [user,setUser]=useState(null)
+  const [checking,setChecking]=useState(true)
+
+  useEffect(()=>{
+    let alive = true
+    req('/api/auth/me')
+      .then(data=>{ if(alive) setUser(data.user) })
+      .catch(()=>{ if(alive) setUser(null) })
+      .finally(()=>{ if(alive) setChecking(false) })
+    return ()=>{ alive = false }
+  },[])
+
+  async function logout(){
+    await req('/api/auth/logout',{method:'POST'}).catch(()=>{})
+    setUser(null)
+    notify('Logged out.', 'success')
+  }
+
+  let content
+  if(checking){
+    content = <div className={"login-shell theme-"+themeValue}><div className="login-panel"><div className="card login-card"><span className="eyebrow">Dashboard Lock</span><h1>Checking session...</h1><p className="muted">Verifying your saved login.</p></div></div></div>
+  } else if(!user){
+    content = <LoginScreen themeValue={themeValue} setTheme={setTheme} onLogin={setUser} notify={notify}/>
+  } else {
+    content = <DashboardApp user={user} onLogout={logout} onChangedUser={setUser} themeValue={themeValue} setTheme={setTheme} notify={notify}/>
+  }
+
+  return <>
+    {content}
+    <Toast toast={toast} onClose={()=>setToast(null)}/>
+  </>
 }
 
 createRoot(document.getElementById('root')).render(<App/>)
