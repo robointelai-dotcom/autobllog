@@ -1,0 +1,14 @@
+AutoBlog v12 Multi Client install
+
+1. Push this package to GitHub.
+2. Pull on server.
+3. Reinstall server and client dependencies.
+4. Build client.
+5. Restart Node backend and nginx.
+6. Login at https://domaincontroller.in/
+7. Open Clients tab.
+8. Add page name: global1
+9. Open https://domaincontroller.in/global1/
+10. Login with admin / admin@2020 and change password in Security.
+
+No new nginx location is needed if nginx already proxies all unknown paths to the Node app or serves this Node app for the domain. The React SPA fallback handles /global1/.

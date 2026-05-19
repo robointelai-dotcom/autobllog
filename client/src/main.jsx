@@ -4,6 +4,24 @@ import './style.css'
 
 const API = import.meta.env.VITE_API_BASE || ''
 const DEFAULT_CSV = 'Keyword,Topic,Category,Tags,image,Backlink\n'
+const RESERVED_CLIENT_PATHS = new Set(['api','assets','static','client','clients','admin','login','logout','healthz','favicon.ico'])
+
+function detectClientSlug(){
+  const first = (window.location.pathname || '/').split('/').filter(Boolean)[0] || ''
+  if (!first || RESERVED_CLIENT_PATHS.has(first.toLowerCase())) return 'main'
+  return /^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$|^[a-z0-9]$/.test(first) ? first.toLowerCase() : 'main'
+}
+const CLIENT_SLUG = detectClientSlug()
+const CLIENT_BASE_PATH = CLIENT_SLUG === 'main' ? '' : `/${CLIENT_SLUG}`
+const API_PREFIX = CLIENT_SLUG === 'main' ? '/api' : `/api/t/${CLIENT_SLUG}`
+function apiPath(path){
+  const clean = String(path || '')
+  if (clean.startsWith('/api/')) return clean
+  return API_PREFIX + (clean.startsWith('/') ? clean : `/${clean}`)
+}
+function appUrl(slug='main'){
+  return `${window.location.origin}${slug === 'main' ? '/' : `/${slug}/`}`
+}
 
 function getAdminKey(){ return localStorage.getItem('ab_admin_key') || '' }
 function setAdminKey(v){ localStorage.setItem('ab_admin_key', v || '') }
@@ -29,7 +47,7 @@ async function req(path, options={}){
   const headers = new Headers(options.headers || {})
   const adminKey = getAdminKey()
   if (adminKey) headers.set('x-admin-key', adminKey)
-  const r = await fetch(API+path, { credentials: 'include', ...options, headers })
+  const r = await fetch(API+apiPath(path), { credentials: 'include', ...options, headers })
   const ct = r.headers.get('content-type') || ''
   const raw = await r.text().catch(()=> '')
   let payload = raw
@@ -41,7 +59,7 @@ async function req(path, options={}){
   if(!r.ok){
     let message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : String(payload || '')
     if (/Cannot\s+(GET|POST|PUT|DELETE)\s+\/api\//i.test(message) || /<!doctype html/i.test(message)) {
-      message = 'Dashboard backend is still old or not restarted. API route missing: '+path+'. Restart the Node server from /opt/autoblog/server and clear browser cache.'
+      message = 'Dashboard backend is still old or not restarted. API route missing: '+apiPath(path)+'. Restart the Node server from /opt/autoblog/server and clear browser cache.'
     }
     throw new Error(message || r.statusText)
   }
@@ -286,6 +304,79 @@ function SecuritySettings({user,onLogout,onChangedUser,notify}){
   </div>
 }
 
+
+function ClientApps({notify}){
+  const [items,setItems]=useState([])
+  const [form,setForm]=useState({slug:'',name:''})
+  const [busy,setBusy]=useState(false)
+  async function load(){
+    try { setItems(await req('/clients')) }
+    catch(e){ notify(e.message, 'error') }
+  }
+  useEffect(()=>{ load() },[])
+  function cleanSlug(v){ return String(v||'').toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,60) }
+  async function create(e){
+    e.preventDefault()
+    const slug = cleanSlug(form.slug)
+    if(!slug || slug === 'main') return notify('Add a client page name like global1, client-a, or demo1.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/clients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug,name:form.name || slug})})
+      notify(`Client app created: ${data.client?.url || appUrl(slug)}`, 'success')
+      setForm({slug:'',name:''})
+      await load()
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
+  async function copyUrl(url){
+    try { await navigator.clipboard.writeText(url); notify('Client URL copied.', 'success') }
+    catch { notify(url, 'success') }
+  }
+  return <div className="clients-page">
+    <section className="hero">
+      <div>
+        <span className="eyebrow">Multi Client App Builder</span>
+        <h1>Create a full new dashboard URL for every client.</h1>
+        <p>Add a page name like <b>global1</b>. The system creates <b>/global1</b> as a complete dashboard with separate login, separate sites, separate logs, separate schedules, and a separate Mongo database.</p>
+        <div className="hero-actions"><a className="btn primary" href={appUrl('global1')} target="_blank" rel="noreferrer">Example /global1</a><button className="btn" onClick={load}>Refresh clients</button></div>
+      </div>
+      <div className="metric"><span>Current app</span><strong>{CLIENT_SLUG}</strong><small>{CLIENT_SLUG==='main'?'Root database':'Isolated client database'}</small></div>
+    </section>
+    <div className="grid two">
+      <form className="card" onSubmit={create}>
+        <div className="card-head"><div><h2>Add new client page</h2><p>This creates a new isolated app URL without duplicating heavy files.</p></div></div>
+        <div className="form-grid">
+          <label>Page name / slug<input required value={form.slug} onChange={e=>setForm({...form,slug:cleanSlug(e.target.value)})} placeholder="global1" /></label>
+          <label>Client display name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Global Client 1" /></label>
+        </div>
+        <div className="preview-url"><span>New URL</span><b>{appUrl(cleanSlug(form.slug) || 'global1')}</b></div>
+        <div className="right"><button className="btn primary" disabled={busy}>{busy?'Creating...':'Create Client App'}</button></div>
+      </form>
+      <div className="card">
+        <div className="card-head"><div><h2>How isolation works</h2><p>Good performance: one codebase, many isolated client databases.</p></div></div>
+        <ul className="checklist">
+          <li><b>/</b> keeps your main dashboard and current data.</li>
+          <li><b>/global1</b>, <b>/client2</b> etc. each get a new Mongo database.</li>
+          <li>Each client starts with temporary login <b>admin / admin@2020</b>.</li>
+          <li>Each client has its own Security tab to change username/password.</li>
+          <li>No full file-copy needed per client, so server performance stays stable.</li>
+        </ul>
+      </div>
+    </div>
+    <div className="card">
+      <div className="card-head"><div><h2>Client apps</h2><p>Open any client URL and manage it as a separate application.</p></div><button className="btn" onClick={load}>Refresh</button></div>
+      <div className="table-wrap"><table><thead><tr><th>Client</th><th>URL</th><th>Database</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(c=><tr key={c.slug}>
+        <td><strong>{c.name}</strong><div className="small">/{c.slug}</div></td>
+        <td className="small"><a href={c.url} target="_blank" rel="noreferrer">{c.url}</a></td>
+        <td className="small log-message">{c.databaseName}</td>
+        <td><span className={'badge '+(c.enabled?'success':'neutral')}>{c.enabled?'Active':'Disabled'}</span></td>
+        <td><div className="action-stack"><a className="btn primary" href={c.url} target="_blank" rel="noreferrer">Open</a><button className="btn" onClick={()=>copyUrl(c.url)}>Copy URL</button></div></td>
+      </tr>)}</tbody></table></div>
+      {!items.length && <p className="muted empty-state">No clients yet. Add your first client page name above.</p>}
+    </div>
+  </div>
+}
+
 function KPIs({sites}){
   const t = useMemo(()=>{
     const s={count:sites.length,enabled:0,sent:0,failed:0,lastOk:null}
@@ -314,7 +405,7 @@ function Dashboard({sites,onTab}){
         <h1>World-class WordPress automation control room.</h1>
         <p>Control CSV auto updates, Gemini API keys, Prompt Studio, WordPress plugin upload/activation/removal, post history, queue health, schedules and bridge checks from one premium dashboard.</p>
         <div className="hero-actions">
-          <button className="btn primary" onClick={()=>onTab('sites')}>Manage sites</button>
+          <button className="btn primary" onClick={()=>onTab('clients')}>Client Apps</button><button className="btn" onClick={()=>onTab('sites')}>Manage sites</button>
           <button className="btn" onClick={()=>onTab('queue')}>Smart CSV sync</button>
           <button className="btn glow" onClick={()=>onTab('prompt')}>Prompt Studio</button>
           <button className="btn" onClick={()=>onTab('keys')}>Gemini API keys</button>
@@ -325,6 +416,7 @@ function Dashboard({sites,onTab}){
       <KPIs sites={sites}/>
     </section>
     <div className="command-grid">
+      <button className="command-card" onClick={()=>onTab('clients')}><span>00</span><b>Client App Builder</b><small>Create /global1, /client2 with isolated DB.</small></button>
       <button className="command-card" onClick={()=>onTab('queue')}><span>01</span><b>Smart CSV Auto Update</b><small>Update changed rows, add new keywords and keep WordPress queue verified.</small></button>
       <button className="command-card" onClick={()=>onTab('keys')}><span>02</span><b>Gemini Key Manager</b><small>Change, test, save and mask Gemini API settings from the dashboard.</small></button>
       <button className="command-card" onClick={()=>onTab('prompt')}><span>03</span><b>Prompt Studio</b><small>Edit Gemini article prompts with variables, preview, save and reset controls.</small></button>
@@ -1010,20 +1102,21 @@ function Logs({notify}){
 function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
   const [tab,setTab]=useState('dash')
   const {sites,loading,refresh}=useSites(notify)
-  const title = tab==='dash'?'Overview':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='plugins'?'Plugin Manager':tab==='security'?'Security':tab==='keys'?'API Keys':'Logs'
+  const title = tab==='dash'?'Overview':tab==='clients'?'Client Apps':tab==='sites'?'Sites':tab==='queue'?'Queue':tab==='prompt'?'Prompt Studio':tab==='history'?'Blog History':tab==='plugins'?'Plugin Manager':tab==='security'?'Security':tab==='keys'?'API Keys':'Logs'
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v11</b><small>CSV → Gemini → WP Plugins</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v12</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
-      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
+      <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button><button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button><button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v11 Dashboard Lock • Plugin Manager + Prompt Studio + CSV Sync</footer>
+      <footer>v12 Multi Client • Isolated DB + Dashboard Lock</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>
       <div className="wrap">
         {tab==='dash' && <Dashboard sites={sites} onTab={setTab}/>} 
+        {tab==='clients' && <ClientApps notify={notify}/>} 
         {tab==='sites' && <><AddSite onAdded={refresh} notify={notify}/><Sites sites={sites} refresh={refresh} notify={notify}/></>}
         {tab==='queue' && <Queue sites={sites} notify={notify}/>} 
         {tab==='prompt' && <PromptStudio sites={sites} notify={notify}/>} 

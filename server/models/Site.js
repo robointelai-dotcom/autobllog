@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const SiteSchema = new mongoose.Schema({
+export const SiteSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   url:  { type: String, required: true, trim: true, maxlength: 2000 },
   apiKey:{ type: String, required: true, select: true },

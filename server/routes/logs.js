@@ -1,9 +1,9 @@
 import express from 'express';
-import JobLog from '../models/JobLog.js';
 import { asyncHandler, isObjectId } from '../lib/utils.js';
 const router = express.Router();
 
 router.get('/', asyncHandler(async (req,res)=>{
+  const { JobLog } = req.models;
   const { siteId, status, action } = req.query;
   const limit = Math.max(1, Math.min(500, Number(req.query.limit || 200)));
   const q={};

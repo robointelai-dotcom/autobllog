@@ -1,6 +1,5 @@
-import Site from '../models/Site.js';
-import JobLog from '../models/JobLog.js';
 import { fetchWithTimeout, readBridgeResponse } from './http.js';
+import { DEFAULT_TENANT, getTenantModels, normalizeTenantSlug } from './tenants.js';
 import { isValidTimeHHMM, isValidTimezone, wpEndpoint } from './utils.js';
 
 function tzFor(site){
@@ -20,7 +19,7 @@ function toCronFromDaily(hhmm){
   return `${Number(mm)} ${Number(hh)} * * *`;
 }
 
-async function runV5Bridge(site){
+async function runV5Bridge(site, tenantSlug){
   const endpoint = wpEndpoint(site.url, '/wp-json/grb/v1/run');
   const attempts = Math.max(1, Math.min(5, Number(process.env.BRIDGE_RETRIES || 2)));
   let lastErr;
@@ -29,7 +28,7 @@ async function runV5Bridge(site){
       const res = await fetchWithTimeout(endpoint, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
-        body: JSON.stringify({ siteId: site._id.toString(), note: 'dashboard-schedule' })
+        body: JSON.stringify({ siteId: site._id.toString(), note: 'dashboard-schedule', tenantSlug })
       }, Number(process.env.BRIDGE_TIMEOUT_MS || 45000));
       return await readBridgeResponse(res);
     } catch (err) {
@@ -40,18 +39,20 @@ async function runV5Bridge(site){
   throw lastErr;
 }
 
-export async function ensureSiteSchedule(agenda, site, manualOnly=false){
+export async function ensureSiteSchedule(agenda, site, manualOnly=false, tenantSlug=DEFAULT_TENANT){
   if (!site?._id) return;
+  const safeTenant = normalizeTenantSlug(tenantSlug);
+  const { JobLog } = getTenantModels(safeTenant);
   const sid = site._id.toString();
-  await agenda.cancel({ name: 'run-v5-bridge', 'data.siteId': sid });
+  await agenda.cancel({ name: 'run-v5-bridge', 'data.siteId': sid, 'data.tenantSlug': safeTenant });
   if (manualOnly || !site.enabled || site.scheduleMode === 'manual') {
     await JobLog.create({ siteId: site._id, action:'schedule', status:'success', message:'Schedule disabled/manual.' }).catch(()=>{});
     return;
   }
 
   const mode = site.scheduleMode;
-  const job = agenda.create('run-v5-bridge', { siteId: sid });
-  job.unique({ 'data.siteId': sid }, { insertOnly: true });
+  const job = agenda.create('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant });
+  job.unique({ 'data.siteId': sid, 'data.tenantSlug': safeTenant }, { insertOnly: true });
 
   if (mode === 'everySeconds') {
     const seconds = Math.max(1, Math.min(100000000, Number(site.everySeconds || 0)));
@@ -77,10 +78,7 @@ export async function ensureSiteSchedule(agenda, site, manualOnly=false){
 
   await job.save();
   await JobLog.create({ siteId: site._id, action:'schedule', status:'success', message:`Schedule saved: ${mode}` }).catch(()=>{});
-
-  if (process.env.RUN_IMMEDIATE_ON_SAVE === 'true' && mode !== 'once') {
-    await agenda.now('run-v5-bridge', { siteId: sid, force: true });
-  }
+  if (process.env.RUN_IMMEDIATE_ON_SAVE === 'true' && mode !== 'once') await agenda.now('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant, force: true });
 }
 
 export function defineJobs(agenda){
@@ -88,7 +86,9 @@ export function defineJobs(agenda){
   const lockLifetime = Math.max(60000, Number(process.env.AGENDA_LOCK_MS || 600000));
 
   agenda.define('run-v5-bridge', { concurrency: CONC, lockLifetime }, async (job) => {
-    const { siteId, force = false } = job.attrs.data || {};
+    const { siteId, tenantSlug = DEFAULT_TENANT, force = false } = job.attrs.data || {};
+    const safeTenant = normalizeTenantSlug(tenantSlug);
+    const { Site, JobLog } = getTenantModels(safeTenant);
     const site = await Site.findById(siteId);
     if (!site || !site.enabled) return;
 
@@ -104,11 +104,7 @@ export function defineJobs(agenda){
     const fmtDay = (date, zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year:'numeric', month:'2-digit', day:'2-digit' }).format(date);
     const todayKey = fmtDay(new Date(), tzFor(site));
     if (site.dailyLimit && site.dailyLimit > 0){
-      if (site.todayKey !== todayKey){
-        site.todayKey = todayKey;
-        site.todayCount = 0;
-        await site.save();
-      }
+      if (site.todayKey !== todayKey){ site.todayKey = todayKey; site.todayCount = 0; await site.save(); }
       if (site.todayCount >= site.dailyLimit){
         await JobLog.create({ siteId: site._id, action:'run', status:'skipped', message:`Daily limit ${site.dailyLimit} reached.` });
         return;
@@ -116,7 +112,7 @@ export function defineJobs(agenda){
     }
 
     try{
-      const out = await runV5Bridge(site);
+      const out = await runV5Bridge(site, safeTenant);
       const resultStatus = out?.result?.status || out?.status || '';
       if (resultStatus === 'skipped') {
         await JobLog.create({ siteId: site._id, action:'run', status:'skipped', message: out?.result?.message || out?.message || 'Bridge skipped run', payload: out });

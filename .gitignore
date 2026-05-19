@@ -8,5 +8,5 @@ build/
 .cache/
 .DS_Store
 *.zip
-server/data/dashboard-auth.json
-server/data/*.tmp
+server/data/
+server/data/**/*.tmp

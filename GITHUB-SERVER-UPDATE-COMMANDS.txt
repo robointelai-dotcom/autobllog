@@ -1,0 +1,109 @@
+GitHub update from Kali — v12 multi client
+
+cd ~/Music
+
+rm -rf autoblog-v12 autobllog-github
+mkdir -p autoblog-v12
+
+unzip -o autoblog-complete-v12-multi-client-isolated-db-package.zip -d autoblog-v12
+unzip -o autoblog-v12/package_v12_multi_client/autobllog-main-v12-multi-client-isolated-db.zip -d autoblog-v12/dashboard
+
+git clone https://github.com/robointelai-dotcom/autobllog.git autobllog-github
+
+rsync -av --delete \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='.env.*' \
+  --exclude='server/.env' \
+  --exclude='server/.env.*' \
+  --exclude='server/data' \
+  --exclude='node_modules' \
+  --exclude='client/node_modules' \
+  --exclude='server/node_modules' \
+  autoblog-v12/dashboard/autobllog-main-v12-multi-client-isolated-db/ \
+  autobllog-github/
+
+cd autobllog-github
+mkdir -p release-plugins
+
+cp ~/Music/autoblog-v12/package_v12_multi_client/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
+cp ~/Music/autoblog-v12/package_v12_multi_client/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
+
+git status
+git add .
+git commit -m "Update AutoBlog Pro v12 multi client isolated database" || echo "No new changes to commit"
+git push origin main
+
+
+Server update — v12 multi client
+
+cd /opt/autoblog
+
+git config --global --add safe.directory /opt/autoblog
+cp -a /opt/autoblog /opt/autoblog-backup-$(date +%F-%H%M%S)
+
+git fetch origin main
+git reset --hard origin/main
+
+source /root/.nvm/nvm.sh 2>/dev/null || true
+npm config set registry https://registry.npmjs.org/
+
+cd /opt/autoblog/server
+rm -rf node_modules package-lock.json npm-shrinkwrap.json
+npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund --legacy-peer-deps --ignore-scripts
+
+cd /opt/autoblog/client
+rm -rf node_modules package-lock.json npm-shrinkwrap.json
+npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund --legacy-peer-deps --ignore-scripts
+npm run build
+
+pkill -f "node index.js" 2>/dev/null || true
+pkill -f "npm.*start" 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
+
+cd /opt/autoblog/server
+nohup npm start > /var/log/autoblog.log 2>&1 &
+echo $! > /var/run/autoblog.pid
+sleep 3
+
+tail -80 /var/log/autoblog.log
+nginx -t
+systemctl restart nginx
+
+Check:
+
+curl -s https://domaincontroller.in/api/healthz
+
+You must see:
+
+"appVersion":"v12-multi-client-isolated-db"
+
+Open root:
+https://domaincontroller.in/?v=12
+
+Login:
+admin
+admin@2020
+
+Create client:
+Clients → Page name: global1 → Create Client App
+
+Open:
+https://domaincontroller.in/global1/?v=12
+
+Login global1:
+admin
+admin@2020
+
+Change password:
+Security → Change username/password
+
+Direct API checks:
+
+curl -i -X POST https://domaincontroller.in/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin@2020"}'
+
+curl -i -X POST https://domaincontroller.in/api/t/global1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin@2020"}'
