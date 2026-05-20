@@ -59,7 +59,7 @@ async function req(path, options={}){
   if(!r.ok){
     let message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : String(payload || '')
     if (/Cannot\s+(GET|POST|PUT|DELETE)\s+\/api\//i.test(message) || /<!doctype html/i.test(message)) {
-      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v15, restart Node from /opt/autoblog/server, then hard refresh browser.'
+      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v16, restart Node from /opt/autoblog/server, then hard refresh browser.'
     }
     throw new Error(message || r.statusText)
   }
@@ -349,7 +349,7 @@ function ClientApps({notify}){
       <div>
         <span className="eyebrow">Fresh Client Instance Builder</span>
         <h1>Create a fresh new app instance for every client.</h1>
-        <p>Add a page name like <b>global1</b>. The system creates <b>/global1</b> as a fresh dashboard with its own Node backend process, own port, own login, own sites, own logs, own schedules, and own Mongo database. v15 also fixes blank white screens on client URLs.</p>
+        <p>Add a page name like <b>global1</b>. The system creates <b>/global1</b> as a fresh dashboard with its own Node backend process, own port, own login, own sites, own logs, own schedules, and own Mongo database. v16 also fixes blank white screens on client URLs.</p>
         <div className="hero-actions"><a className="btn primary" href={appUrl('global1')} target="_blank" rel="noreferrer">Example /global1</a><button className="btn" onClick={load}>Refresh clients</button></div>
       </div>
       <div className="metric"><span>Current app</span><strong>{CLIENT_SLUG}</strong><small>{CLIENT_SLUG==='main'?'Root database':'Isolated client database'}</small></div>
@@ -365,7 +365,7 @@ function ClientApps({notify}){
         <div className="right"><button className="btn primary" disabled={busy}>{busy?'Creating...':'Create Client App'}</button></div>
       </form>
       <div className="card">
-        <div className="card-head"><div><h2>How isolation works</h2><p>Good performance: every client runs its own backend process and DB. v15 works even when Nginx serves the React build statically.</p></div></div>
+        <div className="card-head"><div><h2>How isolation works</h2><p>Good performance: every client runs its own backend process and DB. v16 works even when Nginx serves the React build statically.</p></div></div>
         <ul className="checklist">
           <li><b>/</b> keeps your main dashboard and current data.</li>
           <li><b>/global1</b>, <b>/client2</b> etc. each get a separate Node backend process and Mongo database.</li>

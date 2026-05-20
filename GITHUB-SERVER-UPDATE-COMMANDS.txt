@@ -1,12 +1,11 @@
-GitHub update from Kali
------------------------
+# GitHub update from Kali
 cd ~/Music
 
-rm -rf autoblog-v15 autobllog-github
-mkdir -p autoblog-v15
+rm -rf autoblog-v16 autobllog-github
+mkdir -p autoblog-v16
 
-unzip -o autoblog-complete-v15-client-url-white-screen-fix-package.zip -d autoblog-v15
-unzip -o autoblog-v15/package_v15_client_delete_proxy_fix/autobllog-main-v15-client-url-white-screen-fix.zip -d autoblog-v15/dashboard
+unzip -o autoblog-complete-v16-client-login-proxy-fix-package.zip -d autoblog-v16
+unzip -o autoblog-v16/package_v16_client_login_proxy_fix/autobllog-main-v16-client-login-proxy-fix.zip -d autoblog-v16/dashboard
 
 git clone https://github.com/robointelai-dotcom/autobllog.git autobllog-github
 
@@ -20,27 +19,24 @@ rsync -av --delete \
   --exclude='node_modules' \
   --exclude='client/node_modules' \
   --exclude='server/node_modules' \
-  autoblog-v15/dashboard/ \
+  autoblog-v16/dashboard/ \
   autobllog-github/
 
 cd autobllog-github
 mkdir -p release-plugins
 
-cp ~/Music/autoblog-v15/package_v15_client_delete_proxy_fix/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
-cp ~/Music/autoblog-v15/package_v15_client_delete_proxy_fix/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
+cp ~/Music/autoblog-v16/package_v16_client_login_proxy_fix/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
+cp ~/Music/autoblog-v16/package_v16_client_login_proxy_fix/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
 
-grep -R "Delete" client/src/main.jsx | head
-grep -n "v15-client-url-white-screen-fix" server/index.js
-ls -lah server/lib/instances.js server/routes/clients.js
+grep -n "v16-client-login-proxy-fix" server/index.js
+grep -n "function proxyHttpToPort" server/lib/instances.js
+grep -n "proxyToClientInstanceApi" server/index.js server/lib/instances.js
 
 git add .
-git commit -m "Update AutoBlog Pro v15 client URL white screen fix" || echo "No new changes to commit"
+git commit -m "Update AutoBlog Pro v16 client login proxy fix" || echo "No new changes to commit"
 git push origin main
 
-Server update on VPS
---------------------
-ssh root@YOUR_SERVER_IP
-
+# Server update on VPS
 cd /opt/autoblog
 
 git config --global --add safe.directory /opt/autoblog
@@ -49,9 +45,8 @@ cp -a /opt/autoblog /opt/autoblog-backup-$(date +%F-%H%M%S)
 git fetch origin main
 git reset --hard origin/main
 
-grep -n "v15-client-url-white-screen-fix" server/index.js
-grep -n "router.delete('/:slug'" server/routes/clients.js
-grep -n "stopClientInstance" server/lib/instances.js
+grep -n "v16-client-login-proxy-fix" server/index.js
+grep -n "function proxyHttpToPort" server/lib/instances.js
 
 source /root/.nvm/nvm.sh 2>/dev/null || true
 npm config set registry https://registry.npmjs.org/
@@ -65,11 +60,10 @@ rm -rf node_modules package-lock.json npm-shrinkwrap.json
 npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund --legacy-peer-deps --ignore-scripts
 npm run build
 
-# stop main + old child node processes
+# Restart all old main/child node ports cleanly
 pkill -f "node index.js" 2>/dev/null || true
 pkill -f "npm.*start" 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
-# optional: clear old client ports if stuck
 for p in $(seq 4100 4120); do fuser -k ${p}/tcp 2>/dev/null || true; done
 
 cd /opt/autoblog/server
@@ -82,30 +76,6 @@ tail -100 /var/log/autoblog.log
 nginx -t
 systemctl restart nginx
 
+# Check
 curl -s https://domaincontroller.in/api/healthz
-
-Nginx white-screen fix
-----------------------
-If /global1/ or /tes/ opens blank white, your Nginx is serving static files directly and not passing /clientSlug/ to Node.
-Change Nginx so location / proxies all traffic to 127.0.0.1:4000.
-A sample file is included: NGINX-PROXY-ALL-FIX.conf
-
-Quick tests
------------
-# login root and list clients
-rm -f /tmp/ab-cookie.txt
-curl -i -c /tmp/ab-cookie.txt -X POST https://domaincontroller.in/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin@2020"}'
-
-curl -s -b /tmp/ab-cookie.txt https://domaincontroller.in/api/clients
-
-# delete wrong client, example /tes
-curl -i -b /tmp/ab-cookie.txt -X DELETE https://domaincontroller.in/api/clients/tes
-
-# create fresh client again
-curl -i -b /tmp/ab-cookie.txt -X POST https://domaincontroller.in/api/clients \
-  -H "Content-Type: application/json" \
-  -d '{"slug":"global1","name":"Global Client 1"}'
-
-curl -s https://domaincontroller.in/global1/api/healthz
+curl -s https://domaincontroller.in/api/_client/new/healthz

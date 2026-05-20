@@ -254,7 +254,44 @@ export async function proxyToClientInstanceApi(req, res, next){
 }
 
 function proxyHttpToPort(req, res, port, targetPath, slug){
-  return proxyHttpToPort(req, res, port, targetPath, slug);
+  const headers = { ...req.headers, host: `127.0.0.1:${port}` };
+  delete headers.connection;
+  delete headers['content-length'];
+
+  let body = null;
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length) {
+    body = Buffer.from(JSON.stringify(req.body));
+    headers['content-type'] = headers['content-type'] || 'application/json';
+    headers['content-length'] = String(body.length);
+  }
+
+  const proxyReq = http.request({
+    host: '127.0.0.1',
+    port,
+    method: req.method,
+    path: targetPath || '/',
+    headers,
+    timeout: 120000
+  }, proxyRes => {
+    res.statusCode = proxyRes.statusCode || 502;
+    for (const [k, v] of Object.entries(proxyRes.headers || {})) {
+      if (typeof v !== 'undefined') res.setHeader(k, v);
+    }
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('timeout', () => proxyReq.destroy(new Error('Client instance proxy timeout')));
+  proxyReq.on('error', err => {
+    if (res.headersSent) return;
+    res.status(502).json({
+      error: `Client instance /${slug} is not reachable on port ${port}`,
+      detail: err.message,
+      hint: `Open Clients tab and click Restart for /${slug}, or check ${logFile(slug)}`
+    });
+  });
+
+  if (body) proxyReq.end(body);
+  else req.pipe(proxyReq);
 }
 
 export async function proxyToClientInstance(req, res, next){
