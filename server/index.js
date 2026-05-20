@@ -19,9 +19,9 @@ import { defineJobs } from './lib/jobs.js';
 import { parseBoolean } from './lib/utils.js';
 import { authRouter, requireDashboardAuth } from './lib/auth.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, tenantMiddleware } from './lib/tenants.js';
-import { currentInstanceSlug, isChildInstance, proxyToClientInstance, startAllClientInstances } from './lib/instances.js';
+import { currentInstanceSlug, isChildInstance, proxyToClientInstance, proxyToClientInstanceApi, startAllClientInstances } from './lib/instances.js';
 
-const APP_VERSION = 'v14-client-delete-proxy-fix';
+const APP_VERSION = 'v15-client-url-white-screen-fix';
 const INSTANCE_CHILD = isChildInstance();
 const INSTANCE_SLUG = currentInstanceSlug();
 const app = express();
@@ -115,7 +115,12 @@ function mountApi(prefix, tenantGetter){
   app.use(prefix, router);
 }
 
-// v14 uses fresh backend instances. Root uses /api; client URLs use /client/api and are reverse-proxied to their own Node process.
+// v15 uses fresh backend instances and supports static Nginx hosting.
+// Client API calls go through /api/_client/:slug/*, then the main backend proxies to that client's dedicated Node process.
+// This keeps /new/ working even when Nginx serves the React build statically instead of proxying every path to Node.
+if (!INSTANCE_CHILD) {
+  app.use('/api/_client/:slug', proxyToClientInstanceApi);
+}
 mountApi('/api', () => DEFAULT_TENANT);
 
 app.get('/healthz', (_req,res)=> res.json(healthPayload()));

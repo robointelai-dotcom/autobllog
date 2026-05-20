@@ -2,11 +2,11 @@ GitHub update from Kali
 -----------------------
 cd ~/Music
 
-rm -rf autoblog-v14 autobllog-github
-mkdir -p autoblog-v14
+rm -rf autoblog-v15 autobllog-github
+mkdir -p autoblog-v15
 
-unzip -o autoblog-complete-v14-client-delete-proxy-fix-package.zip -d autoblog-v14
-unzip -o autoblog-v14/package_v14_client_delete_proxy_fix/autobllog-main-v14-client-delete-proxy-fix.zip -d autoblog-v14/dashboard
+unzip -o autoblog-complete-v15-client-url-white-screen-fix-package.zip -d autoblog-v15
+unzip -o autoblog-v15/package_v15_client_delete_proxy_fix/autobllog-main-v15-client-url-white-screen-fix.zip -d autoblog-v15/dashboard
 
 git clone https://github.com/robointelai-dotcom/autobllog.git autobllog-github
 
@@ -20,21 +20,21 @@ rsync -av --delete \
   --exclude='node_modules' \
   --exclude='client/node_modules' \
   --exclude='server/node_modules' \
-  autoblog-v14/dashboard/ \
+  autoblog-v15/dashboard/ \
   autobllog-github/
 
 cd autobllog-github
 mkdir -p release-plugins
 
-cp ~/Music/autoblog-v14/package_v14_client_delete_proxy_fix/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
-cp ~/Music/autoblog-v14/package_v14_client_delete_proxy_fix/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
+cp ~/Music/autoblog-v15/package_v15_client_delete_proxy_fix/sem-seo-bloger-v3.2-smart-csv-v9-prompt-studio.zip release-plugins/
+cp ~/Music/autoblog-v15/package_v15_client_delete_proxy_fix/wp-gamini-remote-bridge-1.3-plugin-manager-v10.zip release-plugins/
 
 grep -R "Delete" client/src/main.jsx | head
-grep -n "v14-client-delete-proxy-fix" server/index.js
+grep -n "v15-client-url-white-screen-fix" server/index.js
 ls -lah server/lib/instances.js server/routes/clients.js
 
 git add .
-git commit -m "Update AutoBlog Pro v14 client delete and proxy fix" || echo "No new changes to commit"
+git commit -m "Update AutoBlog Pro v15 client URL white screen fix" || echo "No new changes to commit"
 git push origin main
 
 Server update on VPS
@@ -49,7 +49,7 @@ cp -a /opt/autoblog /opt/autoblog-backup-$(date +%F-%H%M%S)
 git fetch origin main
 git reset --hard origin/main
 
-grep -n "v14-client-delete-proxy-fix" server/index.js
+grep -n "v15-client-url-white-screen-fix" server/index.js
 grep -n "router.delete('/:slug'" server/routes/clients.js
 grep -n "stopClientInstance" server/lib/instances.js
 

@@ -1,4 +1,4 @@
-AutoBlog Pro v14 - Client Delete + Proxy Fix
+AutoBlog Pro v15 - Client Delete + Proxy Fix
 
 What is fixed:
 - Adds permanent Delete button/API for client apps created from the main dashboard.

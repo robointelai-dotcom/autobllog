@@ -237,6 +237,26 @@ function stripClientPrefix(originalUrl, slug){
   return stripped.startsWith('/') ? stripped : '/' + stripped;
 }
 
+
+export async function proxyToClientInstanceApi(req, res, next){
+  if (isChildInstance()) return next();
+  let slug;
+  try { slug = normalizeTenantSlug(req.params?.slug || ''); } catch { return next(); }
+  if (!slug || slug === 'main') return res.status(400).json({ error:'Invalid client slug for API proxy' });
+
+  const client = await ClientApp.findOne({ slug, enabled:true, mode:'instance' }).lean().catch(()=>null);
+  if (!client?.port) return res.status(404).json({ error:`Client /${slug} not found or not enabled`, hint:'Open the main Clients tab and create/restart this client.' });
+
+  const port = Number(client.port);
+  const apiRemainder = req.url && req.url !== '/' ? req.url : '/';
+  const targetPath = '/api' + apiRemainder;
+  return proxyHttpToPort(req, res, port, targetPath, slug);
+}
+
+function proxyHttpToPort(req, res, port, targetPath, slug){
+  return proxyHttpToPort(req, res, port, targetPath, slug);
+}
+
 export async function proxyToClientInstance(req, res, next){
   if (isChildInstance()) return next();
   const first = (req.path || '/').split('/').filter(Boolean)[0] || '';
@@ -252,26 +272,5 @@ export async function proxyToClientInstance(req, res, next){
 
   const port = Number(client.port);
   const targetPath = stripClientPrefix(req.originalUrl, slug);
-  const body = req.body && Object.keys(req.body).length ? Buffer.from(JSON.stringify(req.body)) : null;
-  const headers = { ...req.headers, host: `127.0.0.1:${port}` };
-  delete headers.connection;
-  delete headers['content-length'];
-  if (body) {
-    headers['content-type'] = headers['content-type'] || 'application/json';
-    headers['content-length'] = String(body.length);
-  }
-
-  const proxyReq = http.request({ host:'127.0.0.1', port, method:req.method, path:targetPath, headers, timeout:120000 }, proxyRes => {
-    res.statusCode = proxyRes.statusCode || 502;
-    for (const [k,v] of Object.entries(proxyRes.headers)) {
-      if (typeof v !== 'undefined') res.setHeader(k, v);
-    }
-    proxyRes.pipe(res);
-  });
-  proxyReq.on('timeout', () => proxyReq.destroy(new Error('Client instance proxy timeout')));
-  proxyReq.on('error', err => {
-    if (!res.headersSent) res.status(502).json({ error:`Client instance /${slug} is not reachable on port ${port}`, detail:err.message, hint:'Open Clients tab and restart the client instance, or check /opt/autoblog-clients/<slug>/logs/server.log' });
-  });
-  if (body) proxyReq.end(body);
-  else req.pipe(proxyReq);
+  return proxyHttpToPort(req, res, port, targetPath, slug);
 }
