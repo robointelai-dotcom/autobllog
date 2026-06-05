@@ -21,7 +21,7 @@ import { authRouter, requireDashboardAuth } from './lib/auth.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, tenantMiddleware } from './lib/tenants.js';
 import { currentInstanceSlug, isChildInstance, proxyToClientInstance, proxyToClientInstanceApi, startAllClientInstances } from './lib/instances.js';
 
-const APP_VERSION = 'v16-client-login-proxy-fix';
+const APP_VERSION = 'v18-random-hourly-scheduler';
 const INSTANCE_CHILD = isChildInstance();
 const INSTANCE_SLUG = currentInstanceSlug();
 const app = express();
@@ -115,7 +115,7 @@ function mountApi(prefix, tenantGetter){
   app.use(prefix, router);
 }
 
-// v16 uses fresh backend instances and supports static Nginx hosting.
+// v18 keeps fresh backend instances and adds random hourly scheduling.
 // Client API calls go through /api/_client/:slug/*, then the main backend proxies to that client's dedicated Node process.
 // This keeps /new/ working even when Nginx serves the React build statically instead of proxying every path to Node.
 if (!INSTANCE_CHILD) {

@@ -59,7 +59,7 @@ async function req(path, options={}){
   if(!r.ok){
     let message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : String(payload || '')
     if (/Cannot\s+(GET|POST|PUT|DELETE)\s+\/api\//i.test(message) || /<!doctype html/i.test(message)) {
-      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v16, restart Node from /opt/autoblog/server, then hard refresh browser.'
+      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v18, restart Node from /opt/autoblog/server, then hard refresh browser.'
     }
     throw new Error(message || r.statusText)
   }
@@ -115,14 +115,14 @@ function parseCsv(text){
   if (!rows.length) return []
 
   let headerRow = rows[0].map(h => clean(h).trim())
-  const hasHeader = headerRow.some(h => /^(keyword|keywords|title)$/i.test(h.replace(/[\s_\-]+/g,'')))
-  if (!hasHeader) headerRow = ['Keyword','Topic','Category','Tags','image','Backlink']
+  const hasHeader = headerRow.some(h => /^(keyword|keywords|title|prompt|customprompt)$/i.test(h.replace(/[\s_\-]+/g,'')))
+  if (!hasHeader) headerRow = ['Keyword','Topic','Category','Tags','image','Backlink','Prompt']
 
   const alias = {
     keyword: 'Keyword', keywords: 'Keyword', title: 'Keyword',
     topic: 'Topic', subject: 'Topic', category: 'Category', categories: 'Category',
     tags: 'Tags', tag: 'Tags', image: 'image', imageurl: 'image', image_url: 'image', featuredimage: 'image', images: 'image',
-    backlink: 'Backlink', backlinkurl: 'Backlink', backlink_url: 'Backlink', url: 'Backlink', link: 'Backlink'
+    backlink: 'Backlink', backlinkurl: 'Backlink', backlink_url: 'Backlink', url: 'Backlink', link: 'Backlink', prompt: 'Prompt', customprompt: 'Prompt', postprompt: 'Prompt', aiprompt: 'Prompt'
   }
   const normHeader = headerRow.map(h => alias[h.replace(/[\s_\-]+/g,'').toLowerCase()] || h)
   const idx = name => normHeader.findIndex(h => h.toLowerCase() === name.toLowerCase())
@@ -137,7 +137,8 @@ function parseCsv(text){
     Category: value(r, 'Category'),
     Tags: value(r, 'Tags'),
     image: value(r, 'image'),
-    Backlink: value(r, 'Backlink')
+    Backlink: value(r, 'Backlink'),
+    Prompt: value(r, 'Prompt')
   })).filter(r => r.Keyword)
 }
 
@@ -502,7 +503,7 @@ function Sites({sites,refresh,notify}){
   }
 
   return <div className="card">
-    <div className="card-head"><div><h2>Sites, schedules and limits</h2><p>Change mode, fill only the matching schedule field, then enable the site.</p></div><input className="compact-input" placeholder="Search sites" value={query} onChange={e=>setQuery(e.target.value)}/></div>
+    <div className="card-head"><div><h2>Sites, schedules and limits</h2><p>Change mode, fill only the matching schedule field, then enable the site. Random hourly means 1 post per selected hour block with a different random minute every time.</p></div><input className="compact-input" placeholder="Search sites" value={query} onChange={e=>setQuery(e.target.value)}/></div>
     <div className="table-wrap">
       <table>
         <thead><tr><th>Site</th><th>Mode</th><th>Schedule</th><th>Enabled</th><th>Sent / Fail</th><th>Daily limit</th><th>Actions</th></tr></thead>
@@ -511,16 +512,20 @@ function Sites({sites,refresh,notify}){
             <td><strong>{s.name}</strong><div className="small">{s.url}</div>{s.apiKeySet && <span className="tiny">API key saved</span>}</td>
             <td>
               <select defaultValue={s.scheduleMode||'manual'} onChange={e=>update(s._id,{scheduleMode:e.target.value})}>
-                <option value="manual">Manual</option><option value="everySeconds">Every seconds</option><option value="everyHours">Every hours</option><option value="dailyTime">Daily</option><option value="cron">Cron</option><option value="once">Once</option>
+                <option value="manual">Manual</option><option value="everySeconds">Every seconds</option><option value="everyHours">Every hours</option><option value="randomHourly">Random hourly</option><option value="dailyTime">Daily</option><option value="cron">Cron</option><option value="once">Once</option>
               </select>
             </td>
             <td><div className="schedule-grid">
               <input type="number" title="Every seconds" placeholder="seconds" defaultValue={s.everySeconds || ''} min="1" max="100000000" step="1" onBlur={e=>update(s._id,{everySeconds:e.target.value?Number(e.target.value):null})}/>
-              <input type="number" title="Every hours" placeholder="hours" defaultValue={s.everyHours || ''} min="1" max="8760" step="1" onBlur={e=>update(s._id,{everyHours:e.target.value?Number(e.target.value):null})}/>
+              <input type="number" title="Every hours" placeholder="fixed hours" defaultValue={s.everyHours || ''} min="1" max="8760" step="1" onBlur={e=>update(s._id,{everyHours:e.target.value?Number(e.target.value):null})}/>
+              <input type="number" title="Random hourly interval. Use 1 for 1 post per hour." placeholder="random hrs" defaultValue={s.randomHours || ''} min="1" max="8760" step="1" onBlur={e=>update(s._id,{randomHours:e.target.value?Number(e.target.value):null})}/>
+              <input type="number" title="Random minute minimum" placeholder="min min" defaultValue={s.randomMinuteMin ?? 0} min="0" max="59" step="1" onBlur={e=>update(s._id,{randomMinuteMin:e.target.value===''?0:Number(e.target.value)})}/>
+              <input type="number" title="Random minute maximum" placeholder="max min" defaultValue={s.randomMinuteMax ?? 59} min="0" max="59" step="1" onBlur={e=>update(s._id,{randomMinuteMax:e.target.value===''?59:Number(e.target.value)})}/>
               <input type="time" title="Daily time" defaultValue={s.dailyAt || ''} onBlur={e=>update(s._id,{dailyAt:e.target.value||null})}/>
               <input title="Timezone" placeholder="Asia/Colombo" defaultValue={s.timezone || ''} onBlur={e=>update(s._id,{timezone:e.target.value||null})}/>
               <input title="Cron" placeholder="0 9 * * *" defaultValue={s.scheduleCron || ''} onBlur={e=>update(s._id,{scheduleCron:e.target.value||null})}/>
               <input title="Once" type="datetime-local" defaultValue={s.onceAt?new Date(s.onceAt).toISOString().slice(0,16):''} onBlur={e=>update(s._id,{onceAt:e.target.value||null})}/>
+              {s.scheduleMode==='randomHourly' && <div className="small random-next">Next random run: {s.nextRandomRunAt ? new Date(s.nextRandomRunAt).toLocaleString() : 'saving...'}</div>}
             </div></td>
             <td><label className="switch"><input type="checkbox" defaultChecked={s.enabled} onChange={e=>update(s._id,{enabled:e.target.checked})}/><span></span></label></td>
             <td><span className="badge success">{s.counters?.sent||0}</span> <span className="badge error">{s.counters?.failed||0}</span></td>
@@ -613,7 +618,7 @@ function Queue({sites,notify}){
     </div>
     <div className="card">
       <div className="card-head"><div><h2>Current WordPress Queue</h2><p>Showing first 100 rows. Rows are removed only after a post is published successfully.</p></div><span className="badge neutral">{list.items?.length||0} rows</span></div>
-      <div className="table-wrap"><table><thead><tr><th>Keyword</th><th>Topic</th><th>Category</th><th>Tags</th><th>Backlink</th></tr></thead><tbody>{(list.items||[]).slice(0,100).map((r,i)=><tr key={i}><td>{r.Keyword}</td><td>{r.Topic}</td><td>{r.Category}</td><td>{r.Tags}</td><td className="small">{r.Backlink || r.BacklinkURL}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Keyword</th><th>Topic</th><th>Category</th><th>Tags</th><th>Backlink</th><th>Prompt</th></tr></thead><tbody>{(list.items||[]).slice(0,100).map((r,i)=><tr key={i}><td>{r.Keyword}</td><td>{r.Topic}</td><td>{r.Category}</td><td>{r.Tags}</td><td className="small">{r.Backlink || r.BacklinkURL}</td><td className="small">{r.Prompt ? 'Custom per-post prompt' : '-'}</td></tr>)}</tbody></table></div>
       <div className="csv-preview-card">
         <h3>CSV Preview</h3>
         <div className="table-wrap mini-table"><table><thead><tr><th>Keyword</th><th>Topic</th><th>Category</th></tr></thead><tbody>{preview.slice(0,8).map((r,i)=><tr key={i}><td>{r.Keyword}</td><td>{r.Topic}</td><td>{r.Category}</td></tr>)}</tbody></table></div>
@@ -793,26 +798,32 @@ function PromptStudio({sites,notify}){
   const [siteId,setSiteId]=useState('')
   const [prompt,setPrompt]=useState('')
   const [defaultPrompt,setDefaultPrompt]=useState('')
-  const [preview,setPreview]=useState('')
-  const [warnings,setWarnings]=useState([])
   const [status,setStatus]=useState(null)
   const [busy,setBusy]=useState(false)
-  const [sample,setSample]=useState({topic:'open demat account', keyword:'open demat account'})
+  const [warnings,setWarnings]=useState([])
+  const [preview,setPreview]=useState('')
+  const [sample,setSample]=useState({topic:'Best demat account for beginners',keyword:'best demat account'})
+  const [ai,setAi]=useState({
+    focus:'SEO blog article', businessType:'', audience:'Indian readers and potential customers', language:'English',
+    tone:'professional, helpful, trustworthy and easy to understand', wordCount:1500, compliance:'finance', extraRules:'',
+    includeFaq:true, includeTable:false, includeConclusion:true, includeBacklink:true, geminiApiKey:'', geminiModel:'gemini-2.5-flash', cronEnabled:true
+  })
   const selected = sites.find(s=>s._id===siteId)
 
   useEffect(()=>{ if(siteId) loadPrompt() },[siteId])
+  useEffect(()=>{ if(selected && !ai.businessType) setAi(a=>({...a,businessType:selected.name || ''})) },[selected?._id])
 
   async function loadPrompt(){
     if(!siteId) return notify('Select site first.', 'error')
     setBusy(true)
     try{
-      const data = await req('/api/sites/'+siteId+'/prompt?previewTopic='+encodeURIComponent(sample.topic)+'&previewKeyword='+encodeURIComponent(sample.keyword))
+      const data = await req('/api/sites/'+siteId+'/prompt')
       setStatus(data)
       setPrompt(data.customPrompt || '')
       setDefaultPrompt(data.defaultPrompt || '')
       setPreview(data.activePromptPreview || '')
-      setWarnings(Array.isArray(data.warnings) ? data.warnings : [])
-      notify(data.fallback ? 'Prompt status loaded. Update Bridge plugin to v9 for full prompt read/write.' : 'Prompt Studio loaded.', data.fallback ? 'warning' : 'success')
+      setWarnings(Array.isArray(data.warnings)?data.warnings:[])
+      notify(data.fallback ? 'Prompt loaded with fallback. Update Bridge plugin for full AI prompt tools.' : 'Prompt Studio loaded.', data.fallback ? 'warning' : 'success')
     }catch(e){ notify(e.message, 'error') }
     finally{ setBusy(false) }
   }
@@ -820,25 +831,24 @@ function PromptStudio({sites,notify}){
   function validateLocal(text){
     const out=[]
     if(!text.trim()) return out
-    if(!text.includes('$topic') && !text.includes('{{topic}}') && !text.includes('{topic}')) out.push('Missing $topic / {{topic}} variable.')
-    if(!text.includes('$keyword') && !text.includes('{{keyword}}') && !text.includes('{keyword}')) out.push('Missing $keyword / {{keyword}} variable.')
-    if(!/html/i.test(text)) out.push('Recommended: mention HTML output format.')
+    if(!text.includes('$topic') && !text.includes('{{topic}}') && !text.includes('{topic}')) out.push('Missing $topic or {{topic}} variable.')
+    if(!text.includes('$keyword') && !text.includes('{{keyword}}') && !text.includes('{keyword}')) out.push('Missing $keyword or {{keyword}} variable.')
+    if(!/html|<h1>|<h2>|<p>/i.test(text)) out.push('Prompt should ask for clean HTML output.')
+    if(!/no markdown|do not use markdown|markdown/i.test(text)) out.push('Add a no-markdown rule to prevent code fences.')
     if(text.length > 20000) out.push('Prompt is too long. Max 20000 characters.')
+    if(/guaranteed returns?|sure profit|assured profit|get rich quick/i.test(text)) out.push('Remove risky guarantee/profit wording.')
     return out
   }
-
   function localPreview(text){
     const active = text.trim() ? text : (defaultPrompt || '')
-    return active
-      .replaceAll('$topic', sample.topic).replaceAll('{{topic}}', sample.topic).replaceAll('{topic}', sample.topic)
-      .replaceAll('$keyword', sample.keyword).replaceAll('{{keyword}}', sample.keyword).replaceAll('{keyword}', sample.keyword)
-      .replaceAll('$backlink', 'https://example.com').replaceAll('{{backlink}}', 'https://example.com').replaceAll('{backlink}', 'https://example.com')
+    return active.replaceAll('$topic', sample.topic).replaceAll('{{topic}}', sample.topic).replaceAll('{topic}', sample.topic).replaceAll('$keyword', sample.keyword).replaceAll('{{keyword}}', sample.keyword).replaceAll('{keyword}', sample.keyword).replaceAll('$backlink','https://example.com').replaceAll('{{backlink}}','https://example.com').replaceAll('{backlink}','https://example.com')
   }
-
   useEffect(()=>{ setWarnings(validateLocal(prompt)); setPreview(localPreview(prompt)) },[prompt, sample.topic, sample.keyword, defaultPrompt])
 
   async function savePrompt(){
     if(!siteId) return notify('Select site first.', 'error')
+    const localWarnings = validateLocal(prompt)
+    if(localWarnings.some(w=>w.includes('Missing'))) return notify('Fix required prompt variables before saving: $topic and $keyword.', 'error')
     if(prompt.length > 20000) return notify('Prompt too long. Max 20000 characters.', 'error')
     setBusy(true)
     try{
@@ -847,7 +857,7 @@ function PromptStudio({sites,notify}){
       setPrompt(data.customPrompt || prompt)
       setDefaultPrompt(data.defaultPrompt || defaultPrompt)
       setPreview(data.activePromptPreview || localPreview(prompt))
-      setWarnings(Array.isArray(data.warnings) ? data.warnings : validateLocal(prompt))
+      setWarnings(Array.isArray(data.warnings)?data.warnings:validateLocal(prompt))
       notify('Prompt saved to WordPress plugin.', (data.warnings && data.warnings.length) ? 'warning' : 'success')
     }catch(e){ notify(e.message, 'error') }
     finally{ setBusy(false) }
@@ -855,7 +865,7 @@ function PromptStudio({sites,notify}){
 
   async function resetPrompt(){
     if(!siteId) return notify('Select site first.', 'error')
-    if(!confirm('Reset this site to the built-in default Gemini prompt?')) return
+    if(!confirm('Reset this site to built-in default prompt?')) return
     setBusy(true)
     try{
       const data = await req('/api/sites/'+siteId+'/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearCustomPrompt:true, previewTopic:sample.topic, previewKeyword:sample.keyword})})
@@ -865,20 +875,47 @@ function PromptStudio({sites,notify}){
     finally{ setBusy(false) }
   }
 
-  function insertSnippet(snippet){
-    setPrompt(p => (p ? p + '\n\n' : '') + snippet)
+  function insertSnippet(snippet){ setPrompt(p => (p ? p + '\n\n' : '') + snippet) }
+
+  async function generateAiPrompt(){
+    if(!siteId) return notify('Select site first.', 'error')
+    setBusy(true)
+    try{
+      const data = await req('/api/sites/'+siteId+'/prompt/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...ai, businessType: ai.businessType || selected?.name || '', sampleTopic:sample.topic, sampleKeyword:sample.keyword})})
+      const generated = data.prompt || data.customPrompt || ''
+      if(!generated) throw new Error('AI generator returned empty prompt')
+      setPrompt(generated)
+      setWarnings(Array.isArray(data.warnings)?data.warnings:validateLocal(generated))
+      setPreview(localPreview(generated))
+      notify(data.source === 'dashboard-safe-template-fallback' ? 'AI bridge not available, safe template created. You can save it now.' : 'AI prompt generated carefully. Review then save/activate.', data.warnings?.length ? 'warning' : 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
   }
 
-  const promptChars = prompt.length
-  const variableOk = !prompt.trim() || (prompt.includes('$topic') || prompt.includes('{{topic}}') || prompt.includes('{topic}')) && (prompt.includes('$keyword') || prompt.includes('{{keyword}}') || prompt.includes('{keyword}'))
+  async function activateAiAutoblog(){
+    if(!siteId) return notify('Select site first.', 'error')
+    const localWarnings = validateLocal(prompt)
+    if(!prompt.trim()) return notify('Generate or write a prompt first.', 'error')
+    if(localWarnings.some(w=>w.includes('Missing'))) return notify('Fix required variables before activation: $topic and $keyword.', 'error')
+    if(!confirm('This will save the prompt to this WordPress site and enable AI auto generation/cron for future blog posts. Continue?')) return
+    setBusy(true)
+    try{
+      const payload = { customPrompt: prompt, geminiModel: ai.geminiModel, cronEnabled: ai.cronEnabled }
+      if(ai.geminiApiKey.trim()) payload.geminiApiKey = ai.geminiApiKey.trim()
+      const data = await req('/api/sites/'+siteId+'/prompt/activate-ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      setStatus(data); setAi(a=>({...a,geminiApiKey:''}))
+      notify('AI auto-generation prompt activated for this site.', data.warnings?.length ? 'warning' : 'success')
+    }catch(e){ notify(e.message, 'error') }
+    finally{ setBusy(false) }
+  }
 
   return <div className="prompt-page">
     <section className="hero prompt-hero">
       <div>
-        <span className="eyebrow">Prompt Studio</span>
-        <h1>Change your Gemini blog prompt from the Remote Controller.</h1>
-        <p>Edit the article generation prompt used by SEM SEO BLOGER. Use variables like <b>$topic</b>, <b>$keyword</b> and <b>$backlink</b>, preview the final prompt, then save it directly into WordPress through the Bridge.</p>
-        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={loadPrompt}>{busy?'Loading...':'Load prompt'}</button><button className="btn glow" disabled={!siteId||busy} onClick={savePrompt}>Save prompt</button><button className="btn danger" disabled={!siteId||busy} onClick={resetPrompt}>Reset default</button></div>
+        <span className="eyebrow">Prompt Studio v18</span>
+        <h1>Generate, validate, and activate safe Gemini blog prompts per site.</h1>
+        <p>Use AI Prompt Wizard to create a careful site-specific prompt. Every WordPress site and every fresh client app can keep a different prompt, Gemini key, cron setting, and CSV queue.</p>
+        <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={loadPrompt}>{busy?'Loading...':'Load prompt'}</button><button className="btn glow" disabled={!siteId||busy} onClick={generateAiPrompt}>AI Generate Prompt</button><button className="btn primary" disabled={!siteId||busy} onClick={activateAiAutoblog}>Save + Activate AI Auto Generate</button><button className="btn danger" disabled={!siteId||busy} onClick={resetPrompt}>Reset default</button></div>
       </div>
       <div className="card api-selector-card">
         <label>Select WordPress site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">-- select site --</option>{sites.map(s=><option key={s._id} value={s._id}>{s.name}</option>)}</select></label>
@@ -888,28 +925,59 @@ function PromptStudio({sites,notify}){
 
     <div className="api-status-grid">
       <div className="metric"><span>Prompt mode</span><strong className="metric-date">{status? (status.customPromptSet?'Custom':'Default') : '-'}</strong><small>Remote WordPress setting</small></div>
-      <div className="metric"><span>Characters</span><strong>{promptChars}</strong><small>Max 20000</small></div>
-      <div className="metric"><span>Variables</span><strong className="metric-date">{variableOk?'OK':'Check'}</strong><small>$topic + $keyword recommended</small></div>
+      <div className="metric"><span>Length</span><strong>{prompt.length}</strong><small>max 20,000</small></div>
+      <div className="metric"><span>Warnings</span><strong>{warnings.length}</strong><small>must be reviewed</small></div>
       <div className="metric"><span>Bridge</span><strong className="metric-date">{status?.bridgeVersion || '-'}</strong><small>Prompt endpoint</small></div>
     </div>
 
-    <div className="grid two prompt-grid">
+    <div className="grid two">
+      <div className="card ai-wizard-card">
+        <div className="card-head"><div><h2>AI Prompt Wizard</h2><p>Generate one strong reusable prompt for this site. It will control every future AI blog post.</p></div></div>
+        <div className="form-grid">
+          <label>Focus / content type<input value={ai.focus} onChange={e=>setAi({...ai,focus:e.target.value})} placeholder="SEO blog article"/></label>
+          <label>Business / site type<input value={ai.businessType} onChange={e=>setAi({...ai,businessType:e.target.value})} placeholder={selected?.name || 'Finance broker, clinic, real estate, etc.'}/></label>
+          <label>Audience<input value={ai.audience} onChange={e=>setAi({...ai,audience:e.target.value})}/></label>
+          <label>Language<input value={ai.language} onChange={e=>setAi({...ai,language:e.target.value})}/></label>
+          <label>Tone<input value={ai.tone} onChange={e=>setAi({...ai,tone:e.target.value})}/></label>
+          <label>Word count<input type="number" min="700" max="5000" value={ai.wordCount} onChange={e=>setAi({...ai,wordCount:Number(e.target.value)})}/></label>
+          <label>Compliance<select value={ai.compliance} onChange={e=>setAi({...ai,compliance:e.target.value})}><option value="finance">Finance / SEBI-safe</option><option value="general">General business safe</option><option value="medical">Medical/health safe</option></select></label>
+          <label>Gemini model<input value={ai.geminiModel} onChange={e=>setAi({...ai,geminiModel:e.target.value})}/></label>
+        </div>
+        <label>Temporary Gemini API key for prompt generation<input type="password" value={ai.geminiApiKey} onChange={e=>setAi({...ai,geminiApiKey:e.target.value})} placeholder="Optional if updated Bridge has Gemini key saved"/></label>
+        <label>Extra restrictions / brand rules<textarea className="small-textarea" value={ai.extraRules} onChange={e=>setAi({...ai,extraRules:e.target.value})} placeholder="Example: mention Goodwill Wealth only as brand, avoid competitors, keep CTA soft."/></label>
+        <div className="check-grid">
+          <label className="inline-check"><input type="checkbox" checked={ai.includeFaq} onChange={e=>setAi({...ai,includeFaq:e.target.checked})}/> FAQ section</label>
+          <label className="inline-check"><input type="checkbox" checked={ai.includeTable} onChange={e=>setAi({...ai,includeTable:e.target.checked})}/> Allow comparison table</label>
+          <label className="inline-check"><input type="checkbox" checked={ai.includeBacklink} onChange={e=>setAi({...ai,includeBacklink:e.target.checked})}/> Use $backlink once</label>
+          <label className="inline-check"><input type="checkbox" checked={ai.cronEnabled} onChange={e=>setAi({...ai,cronEnabled:e.target.checked})}/> Enable auto cron when activating</label>
+        </div>
+        <div className="right"><button className="btn glow" disabled={!siteId||busy} onClick={generateAiPrompt}>AI Generate Prompt</button><button className="btn primary" disabled={!siteId||busy} onClick={activateAiAutoblog}>Save + Activate AI Auto Generate</button></div>
+      </div>
+
       <div className="card prompt-editor-card">
-        <div className="card-head"><div><h2>Prompt editor</h2><p>Leave empty to use default prompt. Save only when you want custom generation logic.</p></div></div>
+        <div className="card-head"><div><h2>Prompt editor</h2><p>Review before saving. Required variables: $topic and $keyword. Optional: $backlink. CSV can also include a Prompt column for per-post override.</p></div></div>
         <textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={'Example:\nWrite a 1500+ word SEO article about "$topic". Include "$keyword" naturally. Return clean HTML only.'}></textarea>
         <div className="prompt-toolbar">
-          <button className="btn small-btn" onClick={()=>insertSnippet('Use Indian market examples, SEBI-safe educational wording, and avoid investment advice guarantees.')}>Add compliance line</button>
+          <button className="btn small-btn" onClick={()=>insertSnippet('Use educational wording only. Do not provide personalised financial advice, guarantee returns, or promise profit.')}>Add compliance line</button>
           <button className="btn small-btn" onClick={()=>insertSnippet('Return clean HTML only with one <p> meta description, one <h1> title, then <h2>, <h3>, <p>, <ul>, <li>.')}>Add HTML format</button>
+          <button className="btn small-btn" onClick={()=>insertSnippet('If a CSV row includes a per-post Prompt/CustomPrompt instruction, follow it only when it does not conflict with these safety and HTML rules.')}>Add per-post rule</button>
           <button className="btn small-btn" onClick={()=>insertSnippet('Naturally include this backlink once if provided: $backlink')}>Add backlink rule</button>
         </div>
         {warnings.length>0 && <div className="notice danger-notice"><b>Prompt warnings:</b><ul>{warnings.map((w,i)=><li key={i}>{w}</li>)}</ul></div>}
-        <div className="right"><button className="btn" disabled={!siteId||busy} onClick={loadPrompt}>Reload</button><button className="btn primary" disabled={!siteId||busy} onClick={savePrompt}>Save Prompt</button></div>
+        <div className="right"><button className="btn" disabled={!siteId||busy} onClick={loadPrompt}>Reload</button><button className="btn primary" disabled={!siteId||busy} onClick={savePrompt}>Save Prompt Only</button></div>
       </div>
+    </div>
 
+    <div className="grid two">
       <div className="card prompt-preview-card">
         <div className="card-head"><div><h2>Live preview</h2><p>Preview with sample topic and keyword before saving.</p></div></div>
         <div className="form-grid sample-grid"><label>Sample topic<input value={sample.topic} onChange={e=>setSample({...sample,topic:e.target.value})}/></label><label>Sample keyword<input value={sample.keyword} onChange={e=>setSample({...sample,keyword:e.target.value})}/></label></div>
         <pre className="prompt-preview">{preview || 'Select a site and load prompt.'}</pre>
+      </div>
+      <div className="card prompt-preview-card">
+        <div className="card-head"><div><h2>Per-post prompt support</h2><p>For special posts, add a CSV column named Prompt, CustomPrompt, PostPrompt, or AI Prompt.</p></div></div>
+        <pre className="prompt-preview compact">Keyword,Topic,Category,Tags,image,Backlink,Prompt{`\n`}best demat account,Best demat account guide,Demat,"brokerage, demat",,https://example.com,"Write for beginners; include fees checklist; keep SEBI-safe."</pre>
+        <div className="notice"><b>Important:</b> Per-post prompt is an extra instruction. It cannot override safety, HTML, no-fake-facts, or compliance rules.</div>
       </div>
     </div>
 
@@ -1119,11 +1187,11 @@ function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v14</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v18</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
       <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button>{CLIENT_SLUG==='main' && <button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button>}<button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v14 Client Delete + Proxy Fix • Separate backend + DB</footer>
+      <footer>v18 Random Hourly Scheduler • AI Prompt Wizard</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>

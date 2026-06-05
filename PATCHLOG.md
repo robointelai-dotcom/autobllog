@@ -1,27 +1,28 @@
-# AutoBlog Pro v10 Plugin Manager Final
+# v17-ai-prompt-wizard
 
-## Added
+- Added AI Prompt Wizard in Prompt Studio.
+- Added backend endpoint: POST /api/sites/:id/prompt/generate.
+- Added backend endpoint: POST /api/sites/:id/prompt/activate-ai.
+- Added safe prompt generator and prompt validation logic.
+- Added bridge endpoint: POST /wp-json/grb/v1/prompt/generate.
+- Bridge v17 can use the Gemini key already saved in WordPress.
+- Added CSV per-post Prompt column support across dashboard, bridge, and SEM SEO BLOGER plugin.
+- SEM SEO BLOGER now passes row-level prompt override to Gemini generation.
+- Strengthened default finance/SEBI-safe prompt restrictions.
+- Preserved v16 fresh client backend/login proxy behavior.
 
-- Dashboard Plugin Manager tab.
-- Upload WordPress plugin ZIP from dashboard.
-- Activate inactive plugins remotely.
-- Deactivate active plugins remotely.
-- Reactivate plugins safely with one click.
-- Remove/delete plugins remotely with confirmation and force-deactivate safety.
-- Remote Bridge self-protection so the dashboard cannot deactivate/delete its own bridge plugin.
-- Bridge `/wp-json/grb/v1/plugins` endpoint for plugin inventory.
-- Bridge `/wp-json/grb/v1/plugins/action` endpoint for activate/deactivate/reactivate/delete.
-- Bridge `/wp-json/grb/v1/plugins/upload` endpoint for ZIP install/update.
-- Node proxy routes `/api/sites/:id/plugins`, `/plugins/action`, and `/plugins/upload`.
-- Bigger dashboard JSON limit for plugin ZIP uploads.
-- Plugin action logs in Reliability Logs.
+## v18-random-hourly-scheduler
+- Added Random hourly schedule mode.
+- Supports 1 post every N hours with random minute and second inside that hour block.
+- Added randomHours, randomMinuteMin, randomMinuteMax and nextRandomRunAt site fields.
+- Random hourly jobs reschedule themselves after each run.
+- Kept v17 AI Prompt Wizard and v16 fresh client backend proxy fixes.
 
-## Retained
+# v18-random-hourly-scheduler
 
-- Smart CSV sync.
-- API key manager.
-- Gemini test/save.
-- Prompt Studio.
-- Blog history.
-- Queue diagnostics.
-- World-class dashboard UI themes.
+- Added Random hourly schedule mode.
+- Added randomHours, randomMinuteMin, randomMinuteMax, and nextRandomRunAt site fields.
+- Scheduler now creates one one-time Agenda job per site, then re-schedules the next random run after each execution.
+- Use Random hrs = 1 for one post per hour with random minute/second timing.
+- Added UI controls in Sites table for random hourly interval and minute range.
+- Preserved v17 AI Prompt Wizard and v16 client login proxy fixes.

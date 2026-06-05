@@ -53,3 +53,26 @@ Do not use the old v12 `/api/t/global1/...` route. v13 client API is:
 ```txt
 /global1/api/...
 ```
+
+## v17 AI Prompt Wizard
+
+Prompt Studio now has an AI Prompt Wizard. Select a site, generate a careful Gemini prompt, review warnings, then click Save + Activate AI Auto Generate.
+
+CSV post-by-post prompt support:
+Add a column named `Prompt`, `CustomPrompt`, `PostPrompt`, or `AI Prompt`. That row-specific instruction is used only for that post and cannot override safety/compliance/HTML rules.
+
+Updated WordPress plugin zips are in `release-plugins/`:
+- sem-seo-bloger-v3.3-ai-prompt-v17.zip
+- wp-gamini-remote-bridge-1.4-ai-prompt-v17.zip
+
+## v18 Random Hourly Scheduler
+
+Sites now support Random hourly mode. Use this when you want posts to publish at human-like times instead of the same fixed minute.
+
+Recommended setup for one post per hour:
+- Schedule mode: Random hourly
+- Random hrs: 1
+- Random minute min: 0
+- Random minute max: 59
+
+The dashboard stores the next random run as `nextRandomRunAt` and reschedules a fresh random time after every run.

@@ -1,16 +1,15 @@
-AutoBlog Pro v13 Fresh Client Instances
+AutoBlog Pro v18 Random Hourly Scheduler install steps
 
-1. Deploy code to /opt/autoblog.
-2. Reinstall server and client dependencies.
-3. Build client.
-4. Restart main backend.
-5. Open https://domaincontroller.in/?v=13
-6. Login: admin / admin@2020
-7. Clients -> add page name global1 -> Create Client App.
-8. Open https://domaincontroller.in/global1/?v=13
-9. Login to client: admin / admin@2020
-10. Security -> change that client's password.
+1. Push the dashboard code to GitHub using GITHUB-SERVER-UPDATE-COMMANDS.txt.
+2. Pull the latest code on VPS /opt/autoblog.
+3. Reinstall server and client dependencies.
+4. Run client build.
+5. Restart main backend and client instance backends.
+6. Open https://domaincontroller.in/?v=18 and hard refresh.
+7. Go to Sites and choose Random hourly schedule mode.
 
-v13 difference:
-- main site and client site no longer share the same backend process.
-- each client gets its own Node process, port, Mongo DB, auth file, and logs.
+For 1 post per hour with random timing:
+- Mode: Random hourly
+- Random hrs: 1
+- Random minute min: 0
+- Random minute max: 59

@@ -82,13 +82,20 @@ export function pickSitePatch(input){
   if ('apiKey' in input && cleanString(input.apiKey, 500)) out.apiKey = cleanString(input.apiKey, 500);
   if ('enabled' in input) out.enabled = !!input.enabled;
 
-  const modes = ['manual','everySeconds','everyHours','dailyTime','cron','once'];
+  const modes = ['manual','everySeconds','everyHours','randomHourly','dailyTime','cron','once'];
   if ('scheduleMode' in input) {
-    if (!modes.includes(input.scheduleMode)) throw new Error('Invalid schedule mode');
-    out.scheduleMode = input.scheduleMode;
+    const requestedMode = input.scheduleMode === 'randomHours' ? 'randomHourly' : input.scheduleMode;
+    if (!modes.includes(requestedMode)) throw new Error('Invalid schedule mode');
+    out.scheduleMode = requestedMode;
   }
   if ('everySeconds' in input) out.everySeconds = input.everySeconds === null || input.everySeconds === '' ? null : Math.max(1, Math.min(100000000, Number(input.everySeconds)));
   if ('everyHours' in input) out.everyHours = input.everyHours === null || input.everyHours === '' ? null : Math.max(1, Math.min(8760, Number(input.everyHours)));
+  if ('randomHours' in input) out.randomHours = input.randomHours === null || input.randomHours === '' ? null : Math.max(1, Math.min(8760, Number(input.randomHours)));
+  if ('randomMinuteMin' in input) out.randomMinuteMin = input.randomMinuteMin === null || input.randomMinuteMin === '' ? 0 : Math.max(0, Math.min(59, Number(input.randomMinuteMin)));
+  if ('randomMinuteMax' in input) out.randomMinuteMax = input.randomMinuteMax === null || input.randomMinuteMax === '' ? 59 : Math.max(0, Math.min(59, Number(input.randomMinuteMax)));
+  if (out.randomMinuteMin !== undefined && out.randomMinuteMax !== undefined && out.randomMinuteMax < out.randomMinuteMin) {
+    const tmp = out.randomMinuteMin; out.randomMinuteMin = out.randomMinuteMax; out.randomMinuteMax = tmp;
+  }
   if ('dailyAt' in input) {
     out.dailyAt = cleanString(input.dailyAt, 20) || null;
     if (out.dailyAt && !isValidTimeHHMM(out.dailyAt)) throw new Error('Daily time must be HH:MM');
@@ -118,7 +125,8 @@ export function validateQueueItems(items){
       Category: cleanString(pickAlias(it, ['Category','category','Categories','categories']), 120),
       Tags: cleanString(pickAlias(it, ['Tags','tags','Tag','tag']), 500),
       image: cleanString(pickAlias(it, ['image','Image','image_url','ImageURL','imageUrl','featured_image','Featured Image']), 2000),
-      Backlink: cleanString(pickAlias(it, ['Backlink','backlink','BacklinkURL','backlink_url','backlinkUrl','URL','url']), 2000)
+      Backlink: cleanString(pickAlias(it, ['Backlink','backlink','BacklinkURL','backlink_url','backlinkUrl','URL','url']), 2000),
+      Prompt: cleanString(pickAlias(it, ['Prompt','prompt','CustomPrompt','custom_prompt','PostPrompt','post_prompt','AI Prompt','ai_prompt']), 20000)
     };
     if (!row.Keyword) { const err = new Error(`row ${idx+1}: Keyword is required`); err.status = 400; throw err; }
     if (!row.Topic) row.Topic = row.Keyword;

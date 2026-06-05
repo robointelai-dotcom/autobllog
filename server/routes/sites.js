@@ -2,6 +2,7 @@ import express from 'express';
 import { ensureSiteSchedule } from '../lib/jobs.js';
 import { fetchWithTimeout, readBridgeResponse } from '../lib/http.js';
 import { asyncHandler, cleanString, isObjectId, maskSite, normalizeSiteUrl, pickSitePatch, wpEndpoint } from '../lib/utils.js';
+import { buildSafePromptTemplate, generatePromptWithGemini, validateArticlePrompt } from '../lib/promptGenerator.js';
 
 const router = express.Router();
 
@@ -167,6 +168,79 @@ router.post('/:id/prompt', asyncHandler(async (req,res)=>{
     res.json(data);
   } catch(e) {
     await JobLog.create({ siteId: site._id, action:'prompt', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
+    res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
+  }
+}));
+
+
+router.post('/:id/prompt/generate', asyncHandler(async (req,res)=>{
+  const { JobLog } = req.models;
+  const site = await loadSiteOr404(req, req.params.id);
+  const body = req.body || {};
+  const payload = {
+    focus: cleanString(body.focus || 'SEO blog article', 160),
+    businessType: cleanString(body.businessType || site.name || 'the selected WordPress site', 160),
+    audience: cleanString(body.audience || 'readers and potential customers', 240),
+    language: cleanString(body.language || 'English', 80),
+    tone: cleanString(body.tone || 'professional, helpful, trustworthy and easy to understand', 180),
+    wordCount: Math.max(700, Math.min(5000, Number(body.wordCount || 1500))),
+    compliance: cleanString(body.compliance || 'general', 40),
+    extraRules: cleanString(body.extraRules || '', 2000),
+    includeFaq: body.includeFaq !== false,
+    includeTable: body.includeTable === true,
+    includeConclusion: body.includeConclusion !== false,
+    includeBacklink: body.includeBacklink !== false,
+    geminiApiKey: cleanString(body.geminiApiKey || '', 3000),
+    geminiModel: cleanString(body.geminiModel || 'gemini-2.5-flash', 120)
+  };
+
+  // Best path: updated WordPress Bridge can use the Gemini key already saved on that site.
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/prompt/generate', { method:'POST', json: payload });
+    await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'success', message:'AI prompt generated using WordPress Bridge/Gemini key', payload:{ warnings:data.warnings || [], source:data.source, model:data.model } }).catch(()=>{});
+    return res.json(data);
+  } catch (bridgeErr) {
+    // Fallback: if the user pasted a temporary key in dashboard, generate from dashboard.
+    if (payload.geminiApiKey) {
+      try {
+        const data = await generatePromptWithGemini(payload);
+        await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'success', message:'AI prompt generated using temporary dashboard Gemini key', payload:{ warnings:data.warnings || [], source:data.source, model:data.model } }).catch(()=>{});
+        return res.json(data);
+      } catch (aiErr) {
+        await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'error', message:aiErr.message, payload:aiErr.payload || { bridgeError: bridgeErr.message } }).catch(()=>{});
+        return res.status(aiErr.status && aiErr.status < 500 ? aiErr.status : 502).json({ error:aiErr.message, bridgeError: bridgeErr.message, payload: aiErr.payload });
+      }
+    }
+
+    // Safe local template fallback so the user can still save a good prompt without AI.
+    const prompt = buildSafePromptTemplate(payload);
+    const warnings = validateArticlePrompt(prompt);
+    await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'skipped', message:'Bridge AI generator unavailable; returned safe local template', payload:{ bridgeError: bridgeErr.message, warnings } }).catch(()=>{});
+    return res.json({ ok:true, prompt, warnings, source:'dashboard-safe-template-fallback', bridgeError: bridgeErr.message, note:'Update the Bridge plugin to v17 or paste a temporary Gemini key to generate with AI.' });
+  }
+}));
+
+router.post('/:id/prompt/activate-ai', asyncHandler(async (req,res)=>{
+  const { JobLog } = req.models;
+  const site = await loadSiteOr404(req, req.params.id);
+  const body = req.body || {};
+  const customPrompt = cleanString(body.customPrompt || body.prompt || '', 20000);
+  if (!customPrompt) return res.status(400).json({ error:'customPrompt is required' });
+  const warnings = validateArticlePrompt(customPrompt);
+  const settingsPayload = {
+    customPrompt,
+    cronEnabled: body.cronEnabled !== false
+  };
+  const geminiApiKey = cleanString(body.geminiApiKey || '', 3000);
+  const geminiModel = cleanString(body.geminiModel || '', 120);
+  if (geminiApiKey) settingsPayload.geminiApiKey = geminiApiKey;
+  if (geminiModel) settingsPayload.geminiModel = geminiModel;
+  try {
+    const data = await callBridge(site, '/wp-json/grb/v1/settings', { method:'POST', json: settingsPayload });
+    await JobLog.create({ siteId: site._id, action:'prompt-ai-activate', status:'success', message:'Prompt saved and AI auto-generation settings activated', payload:{ changed:data.changed || [], warnings } }).catch(()=>{});
+    res.json({ ...data, warnings, promptSaved:true, autoGenerateEnabled: !!settingsPayload.cronEnabled });
+  } catch(e) {
+    await JobLog.create({ siteId: site._id, action:'prompt-ai-activate', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
     res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
   }
 }));
