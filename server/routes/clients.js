@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 import ClientApp from '../models/ClientApp.js';
 import { asyncHandler, cleanString } from '../lib/utils.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, normalizeTenantSlug } from '../lib/tenants.js';
-import { initializeTenantAuth } from '../lib/auth.js';
 import { checkInstanceHealth, clientPublicUrl, instanceDbName, instanceDir, pickClientPort, startClientInstance, stopClientInstance } from '../lib/instances.js';
 
 const router = express.Router();
@@ -39,9 +38,9 @@ async function row(req, item){
 router.get('/', asyncHandler(async (req, res) => {
   await ensureDefaultClientRecord();
   const items = await ClientApp.find().sort({ slug: 1 }).lean();
-  const out = [];
-  for (const item of items) out.push(await row(req, item));
-  res.json(out);
+  // Health checks are independent; run them in parallel so one offline client
+  // does not add a two-second delay for every row in the list.
+  res.json(await Promise.all(items.map(item => row(req, item))));
 }));
 
 router.post('/', asyncHandler(async (req, res) => {
@@ -76,9 +75,14 @@ router.post('/', asyncHandler(async (req, res) => {
     });
   }
 
-  // Create a fresh auth store for this client, then start its dedicated backend process.
-  initializeTenantAuth(slug);
-  const started = await startClientInstance(created.toObject ? created.toObject() : created);
+  // The child process creates its own auth store at server/data/instances/<slug>.
+  let started;
+  try {
+    started = await startClientInstance(created.toObject ? created.toObject() : created);
+  } catch (err) {
+    started = { ok:false, error:err.message };
+    await ClientApp.updateOne({ slug }, { $set:{ processStatus:'error', lastError:err.message } }).catch(()=>{});
+  }
   created = await ClientApp.findOne({ slug }).lean();
 
   const client = await row(req, created);
@@ -129,9 +133,10 @@ router.delete('/:slug', asyncHandler(async (req, res) => {
   const droppedDb = await dropClientDatabase(client.databaseName).catch(err => ({ ok:false, error:err.message }));
 
   const runtimeAuthDir = path.join(SERVER_DATA, 'instances', slug);
+  const legacyAuthDir = path.join(SERVER_DATA, 'tenants', slug);
   const runtimeInstanceDir = instanceDir(slug);
   const removedPaths = [];
-  for (const dir of [runtimeAuthDir, runtimeInstanceDir]) {
+  for (const dir of [runtimeAuthDir, legacyAuthDir, runtimeInstanceDir]) {
     try {
       fs.rmSync(dir, { recursive:true, force:true });
       removedPaths.push(dir);

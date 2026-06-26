@@ -1,6 +1,18 @@
 import { URL } from 'url';
 import { Types } from 'mongoose';
 
+function badRequest(message){
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
+function boundedNumber(value, min, max, label){
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw badRequest(`${label} must be a valid number`);
+  return Math.max(min, Math.min(max, n));
+}
+
 export function isObjectId(id){
   return typeof id === 'string' && Types.ObjectId.isValid(id);
 }
@@ -36,10 +48,11 @@ function pickAlias(obj, names){
 
 export function normalizeSiteUrl(value){
   const raw = cleanString(value, 2000);
-  if (!raw) throw new Error('Site URL is required');
+  if (!raw) throw badRequest('Site URL is required');
   let u;
-  try { u = new URL(raw); } catch { throw new Error('Invalid site URL'); }
-  if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Site URL must start with http:// or https://');
+  try { u = new URL(raw); } catch { throw badRequest('Invalid site URL'); }
+  if (!['http:', 'https:'].includes(u.protocol)) throw badRequest('Site URL must start with http:// or https://');
+  if (u.username || u.password) throw badRequest('Site URL must not contain embedded username or password credentials');
   u.hash = '';
   u.search = '';
   // Dashboard should call the WP root, not a random path.
@@ -48,7 +61,24 @@ export function normalizeSiteUrl(value){
 
 export function wpEndpoint(siteUrl, path){
   const base = normalizeSiteUrl(siteUrl).replace(/\/+$/, '') + '/';
-  return new URL(path.replace(/^\/+/, ''), base).toString();
+  const cleanPath = String(path || '').trim();
+
+  // v18.1 fix: many WordPress sites return an HTML 404 for /wp-json/*
+  // when pretty permalinks, LiteSpeed/security rules, or Nginx rewrites are not
+  // passing the REST route correctly. WordPress always supports the native
+  // query-string REST format below, so the dashboard uses it by default.
+  // Set WP_REST_STYLE=wp-json in .env only if you explicitly need /wp-json/*.
+  const restStyle = String(process.env.WP_REST_STYLE || process.env.WP_REST_MODE || 'query').toLowerCase();
+  if (restStyle !== 'wp-json' && /^\/?wp-json\//i.test(cleanPath.split('?')[0] || '')) {
+    const pseudo = new URL((cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath), 'https://local.invalid');
+    const route = '/' + pseudo.pathname.replace(/^\/wp-json\/+?/i, '').replace(/^\/+/, '');
+    const u = new URL(base);
+    u.searchParams.set('rest_route', route);
+    for (const [key, value] of pseudo.searchParams.entries()) u.searchParams.append(key, value);
+    return u.toString();
+  }
+
+  return new URL(cleanPath.replace(/^\/+/, ''), base).toString();
 }
 
 export function isValidTimeHHMM(v){
@@ -85,31 +115,31 @@ export function pickSitePatch(input){
   const modes = ['manual','everySeconds','everyHours','randomHourly','dailyTime','cron','once'];
   if ('scheduleMode' in input) {
     const requestedMode = input.scheduleMode === 'randomHours' ? 'randomHourly' : input.scheduleMode;
-    if (!modes.includes(requestedMode)) throw new Error('Invalid schedule mode');
+    if (!modes.includes(requestedMode)) throw badRequest('Invalid schedule mode');
     out.scheduleMode = requestedMode;
   }
-  if ('everySeconds' in input) out.everySeconds = input.everySeconds === null || input.everySeconds === '' ? null : Math.max(1, Math.min(100000000, Number(input.everySeconds)));
-  if ('everyHours' in input) out.everyHours = input.everyHours === null || input.everyHours === '' ? null : Math.max(1, Math.min(8760, Number(input.everyHours)));
-  if ('randomHours' in input) out.randomHours = input.randomHours === null || input.randomHours === '' ? null : Math.max(1, Math.min(8760, Number(input.randomHours)));
-  if ('randomMinuteMin' in input) out.randomMinuteMin = input.randomMinuteMin === null || input.randomMinuteMin === '' ? 0 : Math.max(0, Math.min(59, Number(input.randomMinuteMin)));
-  if ('randomMinuteMax' in input) out.randomMinuteMax = input.randomMinuteMax === null || input.randomMinuteMax === '' ? 59 : Math.max(0, Math.min(59, Number(input.randomMinuteMax)));
+  if ('everySeconds' in input) out.everySeconds = input.everySeconds === null || input.everySeconds === '' ? null : boundedNumber(input.everySeconds, 1, 100000000, 'Every-seconds value');
+  if ('everyHours' in input) out.everyHours = input.everyHours === null || input.everyHours === '' ? null : boundedNumber(input.everyHours, 1, 8760, 'Every-hours value');
+  if ('randomHours' in input) out.randomHours = input.randomHours === null || input.randomHours === '' ? null : boundedNumber(input.randomHours, 1, 8760, 'Random-hours value');
+  if ('randomMinuteMin' in input) out.randomMinuteMin = input.randomMinuteMin === null || input.randomMinuteMin === '' ? 0 : boundedNumber(input.randomMinuteMin, 0, 59, 'Random minimum minute');
+  if ('randomMinuteMax' in input) out.randomMinuteMax = input.randomMinuteMax === null || input.randomMinuteMax === '' ? 59 : boundedNumber(input.randomMinuteMax, 0, 59, 'Random maximum minute');
   if (out.randomMinuteMin !== undefined && out.randomMinuteMax !== undefined && out.randomMinuteMax < out.randomMinuteMin) {
     const tmp = out.randomMinuteMin; out.randomMinuteMin = out.randomMinuteMax; out.randomMinuteMax = tmp;
   }
   if ('dailyAt' in input) {
     out.dailyAt = cleanString(input.dailyAt, 20) || null;
-    if (out.dailyAt && !isValidTimeHHMM(out.dailyAt)) throw new Error('Daily time must be HH:MM');
+    if (out.dailyAt && !isValidTimeHHMM(out.dailyAt)) throw badRequest('Daily time must be HH:MM');
   }
   if ('timezone' in input) {
     out.timezone = cleanString(input.timezone, 80) || null;
-    if (out.timezone && !isValidTimezone(out.timezone)) throw new Error('Invalid timezone');
+    if (out.timezone && !isValidTimezone(out.timezone)) throw badRequest('Invalid timezone');
   }
   if ('scheduleCron' in input) out.scheduleCron = cleanString(input.scheduleCron, 120) || null;
   if ('onceAt' in input) {
     out.onceAt = input.onceAt ? new Date(input.onceAt) : null;
-    if (out.onceAt && Number.isNaN(out.onceAt.getTime())) throw new Error('Invalid once date');
+    if (out.onceAt && Number.isNaN(out.onceAt.getTime())) throw badRequest('Invalid once date');
   }
-  if ('dailyLimit' in input) out.dailyLimit = Math.max(0, Math.min(100000, Number(input.dailyLimit || 0)));
+  if ('dailyLimit' in input) out.dailyLimit = boundedNumber(input.dailyLimit || 0, 0, 100000, 'Daily limit');
   return out;
 }
 

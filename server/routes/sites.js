@@ -6,6 +6,16 @@ import { buildSafePromptTemplate, generatePromptWithGemini, validateArticlePromp
 
 const router = express.Router();
 
+function boundedNumber(value, fallback, minimum = 0, maximum = Infinity){
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Math.max(minimum, Math.min(maximum, fallback));
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function positiveTimeout(value, fallback, minimum = 1000){
+  return boundedNumber(value, fallback, minimum);
+}
+
 async function callBridge(site, bridgePath, options = {}){
   const method = options.method || 'GET';
   const headers = { 'x-api-key': site.apiKey, ...(options.headers || {}) };
@@ -15,7 +25,8 @@ async function callBridge(site, bridgePath, options = {}){
     body = JSON.stringify(options.json);
   }
   const u = wpEndpoint(site.url, bridgePath);
-  const r = await fetchWithTimeout(u, { method, headers, body }, Number(process.env.BRIDGE_TIMEOUT_MS || 15000));
+  const timeoutMs = positiveTimeout(options.timeoutMs ?? process.env.BRIDGE_TIMEOUT_MS, 30000);
+  const r = await fetchWithTimeout(u, { method, headers, body }, timeoutMs);
   return readBridgeResponse(r);
 }
 
@@ -91,6 +102,21 @@ router.post('/:id/wp-settings', asyncHandler(async (req,res)=>{
     await JobLog.create({ siteId: site._id, action:'settings', status:'success', message:`Updated remote settings: ${(data.changed || []).join(', ') || 'saved'}`, payload: { changed: data.changed || [] } }).catch(()=>{});
     res.json({ ...data, site: maskSite(site) });
   } catch(e) {
+    // A key-rotation response can be lost after WordPress has already saved the
+    // new key. Verify the new key before reporting failure, then repair the
+    // dashboard copy so the site is not permanently disconnected.
+    if (payload.bridgeApiKey) {
+      try {
+        const candidate = { ...site.toObject(), apiKey: payload.bridgeApiKey };
+        await callBridge(candidate, '/wp-json/grb/v1/ping');
+        site.apiKey = payload.bridgeApiKey;
+        await site.save();
+        let recovered = {};
+        try { recovered = await callBridge(candidate, '/wp-json/grb/v1/settings'); } catch {}
+        await JobLog.create({ siteId: site._id, action:'settings', status:'success', message:'Recovered Bridge API key rotation after the original response was interrupted', payload:{ originalError:e.message } }).catch(()=>{});
+        return res.json({ ...recovered, ok:true, recoveredApiKeyRotation:true, warning:'The original settings response failed, but the new Bridge key was verified and saved in the dashboard.', site:maskSite(site) });
+      } catch {}
+    }
     await JobLog.create({ siteId: site._id, action:'settings', status:'error', message:e.message, payload:e.payload }).catch(()=>{});
     res.status(e.status && e.status < 500 ? e.status : 502).json({ error:e.message, payload:e.payload });
   }
@@ -120,7 +146,7 @@ router.post('/:id/gemini-test', asyncHandler(async (req,res)=>{
   if ('geminiApiKey' in body && cleanString(body.geminiApiKey, 3000)) payload.geminiApiKey = cleanString(body.geminiApiKey, 3000);
   if ('geminiModel' in body && cleanString(body.geminiModel, 120)) payload.geminiModel = cleanString(body.geminiModel, 120);
   try {
-    const data = await callBridge(site, '/wp-json/grb/v1/settings/test-gemini', { method:'POST', json: payload });
+    const data = await callBridge(site, '/wp-json/grb/v1/settings/test-gemini', { method:'POST', json: payload, timeoutMs: positiveTimeout(process.env.BRIDGE_AI_TIMEOUT_MS, 90000, 45000) });
     await JobLog.create({ siteId: site._id, action:'gemini-test', status:'success', message: data.message || 'Gemini key test passed', payload: { model: data.model, usedSavedKey: data.usedSavedKey } }).catch(()=>{});
     res.json(data);
   } catch(e) {
@@ -183,7 +209,7 @@ router.post('/:id/prompt/generate', asyncHandler(async (req,res)=>{
     audience: cleanString(body.audience || 'readers and potential customers', 240),
     language: cleanString(body.language || 'English', 80),
     tone: cleanString(body.tone || 'professional, helpful, trustworthy and easy to understand', 180),
-    wordCount: Math.max(700, Math.min(5000, Number(body.wordCount || 1500))),
+    wordCount: boundedNumber(body.wordCount, 1500, 700, 5000),
     compliance: cleanString(body.compliance || 'general', 40),
     extraRules: cleanString(body.extraRules || '', 2000),
     includeFaq: body.includeFaq !== false,
@@ -196,7 +222,7 @@ router.post('/:id/prompt/generate', asyncHandler(async (req,res)=>{
 
   // Best path: updated WordPress Bridge can use the Gemini key already saved on that site.
   try {
-    const data = await callBridge(site, '/wp-json/grb/v1/prompt/generate', { method:'POST', json: payload });
+    const data = await callBridge(site, '/wp-json/grb/v1/prompt/generate', { method:'POST', json: payload, timeoutMs: positiveTimeout(process.env.BRIDGE_AI_TIMEOUT_MS, 90000, 90000) });
     await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'success', message:'AI prompt generated using WordPress Bridge/Gemini key', payload:{ warnings:data.warnings || [], source:data.source, model:data.model } }).catch(()=>{});
     return res.json(data);
   } catch (bridgeErr) {
@@ -216,7 +242,7 @@ router.post('/:id/prompt/generate', asyncHandler(async (req,res)=>{
     const prompt = buildSafePromptTemplate(payload);
     const warnings = validateArticlePrompt(prompt);
     await JobLog.create({ siteId: site._id, action:'prompt-ai-generate', status:'skipped', message:'Bridge AI generator unavailable; returned safe local template', payload:{ bridgeError: bridgeErr.message, warnings } }).catch(()=>{});
-    return res.json({ ok:true, prompt, warnings, source:'dashboard-safe-template-fallback', bridgeError: bridgeErr.message, note:'Update the Bridge plugin to v17 or paste a temporary Gemini key to generate with AI.' });
+    return res.json({ ok:true, prompt, warnings, source:'dashboard-safe-template-fallback', bridgeError: bridgeErr.message, note:'Update the Bridge plugin to v2.8+ or paste a temporary Gemini key to generate with AI.' });
   }
 }));
 
@@ -229,7 +255,7 @@ router.post('/:id/prompt/activate-ai', asyncHandler(async (req,res)=>{
   const warnings = validateArticlePrompt(customPrompt);
   const settingsPayload = {
     customPrompt,
-    cronEnabled: body.cronEnabled !== false
+    cronEnabled: body.cronEnabled === true
   };
   const geminiApiKey = cleanString(body.geminiApiKey || '', 3000);
   const geminiModel = cleanString(body.geminiModel || '', 120);
@@ -286,10 +312,10 @@ router.post('/:id/plugins/upload', asyncHandler(async (req,res)=>{
   const contentBase64 = typeof body.contentBase64 === 'string' ? body.contentBase64 : '';
   if (!filename || !filename.toLowerCase().endsWith('.zip')) return res.status(400).json({ error:'Only .zip plugin upload is allowed' });
   if (!contentBase64) return res.status(400).json({ error:'contentBase64 is required' });
-  if (contentBase64.length > Number(process.env.PLUGIN_UPLOAD_BASE64_LIMIT || 90 * 1024 * 1024)) return res.status(413).json({ error:'Plugin ZIP is too large for dashboard upload' });
+  if (contentBase64.length > boundedNumber(process.env.PLUGIN_UPLOAD_BASE64_LIMIT, 90 * 1024 * 1024, 1024 * 1024, 128 * 1024 * 1024)) return res.status(413).json({ error:'Plugin ZIP is too large for dashboard upload' });
   const payload = { filename, contentBase64, activate: !!body.activate };
   try {
-    const data = await callBridge(site, '/wp-json/grb/v1/plugins/upload', { method:'POST', json: payload });
+    const data = await callBridge(site, '/wp-json/grb/v1/plugins/upload', { method:'POST', json: payload, timeoutMs: positiveTimeout(process.env.BRIDGE_UPLOAD_TIMEOUT_MS, 180000, 120000) });
     await JobLog.create({ siteId: site._id, action:'plugin-upload', status:'success', message:`Uploaded plugin ${filename}${data.activated ? ' and activated it' : ''}`, payload:{ filename, installedPlugin:data.installedPlugin, activated:data.activated } }).catch(()=>{});
     res.json(data);
   } catch(e) {
@@ -303,6 +329,7 @@ router.delete('/:id', asyncHandler(async (req,res)=>{
   const id = req.params.id;
   if (!isObjectId(id)) return res.status(400).json({ error:'Invalid site id' });
   await req.agenda.cancel({ name:'run-v5-bridge', 'data.siteId': id, 'data.tenantSlug': req.tenantSlug });
+  await req.agenda.cancel({ name:'run-v5-bridge-random-hourly', 'data.siteId': id, 'data.tenantSlug': req.tenantSlug });
   const deleted = await Site.deleteOne({ _id: id });
   res.json({ ok:true, deleted: deleted.deletedCount });
 }));
@@ -315,7 +342,7 @@ router.post('/:id/ping', asyncHandler(async (req,res)=>{
   if (!site) return res.status(404).json({ error:'Not found' });
   try{
     const u = wpEndpoint(site.url, '/wp-json/grb/v1/ping');
-    const r = await fetchWithTimeout(u, { headers: { 'x-api-key': site.apiKey } }, Number(process.env.BRIDGE_TIMEOUT_MS || 15000));
+    const r = await fetchWithTimeout(u, { headers: { 'x-api-key': site.apiKey } }, positiveTimeout(process.env.BRIDGE_TIMEOUT_MS, 15000));
     const data = await readBridgeResponse(r);
     await JobLog.create({ siteId: site._id, action:'ping', status:'success', message: typeof data === 'string' ? data : JSON.stringify(data), payload: typeof data === 'object' ? data : undefined });
     res.json(data);

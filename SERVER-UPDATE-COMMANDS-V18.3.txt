@@ -1,0 +1,44 @@
+# Run after the v18.3 application files are staged. Review paths first.
+set -euo pipefail
+
+APP=/opt/autoblog
+STAMP=$(date +%F-%H%M%S)
+
+# Back up code, .env, data, and current build.
+cp -a "$APP" "${APP}-backup-${STAMP}"
+
+source /root/.nvm/nvm.sh 2>/dev/null || true
+node --version
+npm --version
+
+cd "$APP/server"
+npm ci --omit=dev --no-audit --no-fund
+
+cd "$APP/client"
+npm ci --no-audit --no-fund
+npm run build
+
+# Confirm the application is syntactically valid before restart.
+find "$APP/server" -path '*/node_modules' -prune -o -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
+# Restart exactly ONE method below.
+# PM2:
+# pm2 restart autoblog --update-env
+# pm2 save
+
+# systemd:
+# systemctl restart autoblog
+# systemctl status autoblog --no-pager
+
+# nohup only when PM2/systemd is not used:
+# pkill -f "$APP/server/index.js" 2>/dev/null || true
+# fuser -k 4000/tcp 2>/dev/null || true
+# cd "$APP/server"
+# nohup npm start > /var/log/autoblog.log 2>&1 &
+# echo $! > /var/run/autoblog.pid
+
+sleep 5
+curl -fsS http://127.0.0.1:4000/api/healthz
+grep -E 'BRIDGE_(RUN|AI|UPLOAD)?_?TIMEOUT|JSON_LIMIT|CLIENT_PROXY_TIMEOUT' "$APP/server/.env" || true
+nginx -t
+systemctl reload nginx

@@ -1,0 +1,39 @@
+AUTOBLOG PRO V18.3 — FINAL LOCAL QA REPORT
+Generated: 2026-06-24 13:04:24 UTC
+
+Release versions
+- Dashboard/API: v18.3-deep-stability-fix
+- SEM SEO BLOGER: 5.6.0
+- Remote Bridge: 2.8.0
+
+Environment used
+- Node: v22.16.0
+- PHP: 8.4.16
+
+Passed checks
+1. PHP syntax lint: all SEM and Bridge PHP files passed.
+2. Node syntax: all dashboard server JavaScript files and Node smoke test passed.
+3. PHP smoke suite: passed category runtime creation, owner-token run locks, queue locks, prompt rules, skipPublished, 5,000-row limit, secret redaction, Bridge authentication, key sanitization, malformed JSON handling, transactional settings, plugin protection, and Bridge lock release.
+4. Node smoke suite: passed URL/payload secret redaction, transport-error redaction, embedded-credential URL rejection, invalid schedule-number handling, stale PID ownership, TCP port detection, and instance-slug health detection.
+5. Server production dependency audit: 0 vulnerabilities reported by npm audit --omit=dev.
+6. Client dependency audit: 0 vulnerabilities reported by npm audit.
+7. React/Vite production build: passed.
+8. Subpath build verification: dist/index.html uses ./assets relative URLs.
+9. Package secret/runtime scan and ZIP integrity tests: performed after packaging; see SHA256SUMS.txt and package verification section below.
+
+Not tested locally
+- A real WordPress database and REST request.
+- Real Gemini API credentials and content generation.
+- Actual image downloads and WordPress media permissions.
+- The target VPS MongoDB, Nginx/LiteSpeed, Cloudflare, PM2/systemd, and filesystem ownership.
+- Third-party WordPress theme/plugin conflicts.
+
+Therefore, this report confirms the supplied source and packages passed the listed local checks. It does not claim that an unknown live hosting environment is guaranteed to work without the final deployment checklist in INSTALL-STEPS.txt.
+
+Package verification
+- All four ZIP archives passed unzip integrity testing.
+- SEM ZIP contains the legacy replacement folder sem-seo-bloger-v3.2/.
+- Bridge ZIP contains the legacy replacement folder wp-gamini-remote-bridge-1.4/.
+- Application ZIP contains the production client build and matching plugin ZIPs.
+- Application ZIP excludes node_modules, server/.env, server/data, dashboard auth files, PID files, and logs.
+- High-confidence private-key/API-key signature scan returned no match.

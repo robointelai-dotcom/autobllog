@@ -1,0 +1,49 @@
+AUTOBLOG PRO V18.3 — DEEP STABILITY FIX NOTES
+
+Primary screenshot error fixed
+- Removed the runtime call to the admin-only wp_create_category() helper.
+- Category creation now uses term_exists() and wp_insert_term(), which are available during REST and WP-Cron execution.
+- Handles simultaneous category creation safely.
+
+Publishing and duplicate protection
+- Owner-token publisher lock; an older/stale request cannot release a newer lock.
+- Bridge request-id lock and six-hour idempotent result cache.
+- Dashboard retries reuse the same request ID.
+- Manual-run and Browser Auto overlap guards.
+- Recent-publish recovery removes a stale queue row after a process/server crash.
+- Failed draft and temporary featured-image cleanup.
+- Featured images are no longer injected into content, preventing duplicate images.
+
+Queue and CSV reliability
+- Queue reads/removals and CSV sync use atomic option locks.
+- Sync, append, and stored queue are capped at 5,000 rows.
+- Missing or malformed REST JSON is handled without PHP TypeError.
+- skipPublished removes stale published entries and counts each keyword once.
+- Per-row Prompt is appended to site safety rules rather than replacing them.
+
+Bridge and API-key safety
+- Every REST endpoint uses an authenticated permission callback.
+- Bridge and SEM plugins are protected from remote deactivate/delete.
+- Remote settings are fully validated before any option is changed.
+- Dashboard verifies and recovers a key rotation if the original response is interrupted.
+- WordPress admin rejects a Bridge key shorter than 12 characters and preserves the working key.
+- Secrets are redacted from transport errors, Bridge payloads, stored errors, API responses, and server logs.
+
+Dashboard/application stability
+- Relative Vite assets work under /global1/ and other subpaths.
+- Invalid schedule numbers, URLs, JSON, duplicate database records, and large bodies return controlled HTTP errors.
+- Site URLs containing embedded username/password credentials are rejected.
+- Child process ownership is verified through /proc before a PID is killed.
+- A reused/stale PID cannot terminate an unrelated Linux process.
+- Client port ownership and instance slug are checked before restart/stop actions.
+- Robust timeout/env parsing prevents NaN and accidental immediate timeout behavior.
+- WordPress media libraries are loaded only when featured-image work is required.
+
+Matching versions
+- Dashboard/API: v18.3-deep-stability-fix
+- SEM SEO BLOGER: 5.6.0
+- Remote Bridge: 2.8.0
+- Default Gemini model: gemini-2.5-flash
+
+Important limitation
+Local lint, build, audit, smoke, and archive tests cannot reproduce the target VPS, WordPress database, file permissions, Nginx/LiteSpeed/Cloudflare configuration, third-party plugins, or real API credentials. Complete the live checklist in INSTALL-STEPS.txt after backup and deployment.

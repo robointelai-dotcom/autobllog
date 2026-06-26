@@ -13,8 +13,10 @@ async function findSite(req, siteId){
 }
 
 async function callBridgeHistory(site, limit){
-  const timeout = Number(process.env.BRIDGE_TIMEOUT_MS || 30000);
-  const safeLimit = Math.max(1, Math.min(500, Number(limit || 100)));
+  const timeoutValue = Number(process.env.BRIDGE_TIMEOUT_MS || 30000);
+  const timeout = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : 30000;
+  const limitValue = Number(limit || 100);
+  const safeLimit = Number.isFinite(limitValue) ? Math.max(1, Math.min(500, limitValue)) : 100;
   const primary = wpEndpoint(site.url, `/wp-json/grb/v1/history?limit=${safeLimit}`);
   try {
     const r = await fetchWithTimeout(primary, { headers:{ 'x-api-key': site.apiKey } }, timeout);

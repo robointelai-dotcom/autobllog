@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import net from 'net';
 import { fileURLToPath } from 'url';
 import { spawn, spawnSync } from 'child_process';
 import mongoose from 'mongoose';
@@ -13,8 +14,12 @@ const APP_ROOT = path.resolve(__dirname, '../..');
 const SERVER_INDEX = path.join(APP_ROOT, 'server', 'index.js');
 const SERVER_DATA = path.join(APP_ROOT, 'server', 'data');
 const INSTANCE_ROOT = process.env.CLIENT_INSTANCE_ROOT || '/opt/autoblog-clients';
-const PORT_BASE = Number(process.env.CLIENT_PORT_BASE || 4100);
-const PORT_MAX = Number(process.env.CLIENT_PORT_MAX || 4999);
+function finitePort(value, fallback){
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : fallback;
+}
+const PORT_BASE = finitePort(process.env.CLIENT_PORT_BASE, 4100);
+const PORT_MAX = Math.max(PORT_BASE, finitePort(process.env.CLIENT_PORT_MAX, 4999));
 const DEFAULT_PASSWORD = process.env.DASHBOARD_DEFAULT_PASSWORD || 'admin@2020';
 
 function ensureDir(dir){ fs.mkdirSync(dir, { recursive: true }); }
@@ -48,15 +53,20 @@ export function instanceDbName(slug){
   return tenantDbName(slug);
 }
 
-function portIsOpen(port){
+export function portIsOpen(port){
   return new Promise(resolve => {
-    const req = http.request({ host:'127.0.0.1', port, path:'/api/healthz', method:'GET', timeout:1200 }, res => {
-      res.resume();
-      resolve(res.statusCode >= 200 && res.statusCode < 500);
-    });
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.on('error', () => resolve(false));
-    req.end();
+    const socket = net.createConnection({ host:'127.0.0.1', port:Number(port) });
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(1200);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
   });
 }
 
@@ -82,12 +92,16 @@ export async function checkInstanceHealth(port){
       let raw='';
       res.on('data', d => raw += d);
       res.on('end', () => {
-        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(raw || '{}') }); }
-        catch { resolve({ ok:false, status:res.statusCode, data:raw }); }
+        try {
+          const data = JSON.parse(raw || '{}');
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300 && data?.ok === true, occupied:true, status: res.statusCode, data });
+        } catch {
+          resolve({ ok:false, occupied:true, status:res.statusCode, data:raw });
+        }
       });
     });
-    req.on('timeout', () => { req.destroy(); resolve({ ok:false, error:'timeout' }); });
-    req.on('error', err => resolve({ ok:false, error:err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok:false, occupied:true, error:'timeout' }); });
+    req.on('error', err => resolve({ ok:false, occupied:false, error:err.message }));
     req.end();
   });
 }
@@ -105,11 +119,33 @@ function removePidFile(slug){
   try { fs.rmSync(path.join(instanceDir(slug), 'run.pid'), { force:true }); } catch {}
 }
 
+function removePidFileIfMatches(slug, pid){
+  const current = readPid(slug);
+  if (!current || Number(current) === Number(pid)) removePidFile(slug);
+}
+
+function processExists(pid){
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) return false;
+  try { process.kill(Number(pid), 0); return true; } catch { return false; }
+}
+
+export function pidBelongsToClient(pid, slug){
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return false;
+  const safeSlug = normalizeTenantSlug(slug);
+  try {
+    const env = fs.readFileSync(`/proc/${numericPid}/environ`, 'utf8').split('\0');
+    return env.includes('AUTOBLOG_INSTANCE_CHILD=true') && env.includes(`INSTANCE_SLUG=${safeSlug}`);
+  } catch {
+    return false;
+  }
+}
+
 async function waitForPortClosed(port, tries = 12){
   for (let i=0; i<tries; i++) {
     // eslint-disable-next-line no-await-in-loop
-    const health = await checkInstanceHealth(port);
-    if (!health.ok) return true;
+    const open = await portIsOpen(port);
+    if (!open) return true;
     // eslint-disable-next-line no-await-in-loop
     await new Promise(r => setTimeout(r, 350));
   }
@@ -122,24 +158,36 @@ export async function stopClientInstance(client){
   const port = Number(client.port || 0);
   const pid = Number(client.processPid || readPid(slug) || 0);
   const killed = [];
+  const stalePidWarning = pid && processExists(pid) && !pidBelongsToClient(pid, slug)
+    ? `Saved PID ${pid} does not belong to client "${slug}" and was not killed.`
+    : '';
 
-  if (pid) {
+  if (pid && pidBelongsToClient(pid, slug)) {
     try { process.kill(-pid, 'SIGTERM'); killed.push(`group:${pid}`); } catch {}
     try { process.kill(pid, 'SIGTERM'); killed.push(`pid:${pid}`); } catch {}
   }
 
+  let portWarning = '';
   if (port) {
     await waitForPortClosed(port, 8);
-    const stillOpen = await checkInstanceHealth(port);
-    if (stillOpen.ok) {
-      try { spawnSync('fuser', ['-k', `${port}/tcp`], { stdio:'ignore' }); killed.push(`port:${port}`); } catch {}
-      await waitForPortClosed(port, 8);
+    const still = await checkInstanceHealth(port);
+    if (still.occupied) {
+      const liveSlug = still.ok ? normalizeTenantSlug(still.data?.instanceSlug || still.data?.tenantSlug || 'main') : '';
+      if (still.ok && liveSlug === slug) {
+        try { spawnSync('fuser', ['-k', `${port}/tcp`], { stdio:'ignore' }); killed.push(`port:${port}`); } catch {}
+        await waitForPortClosed(port, 8);
+      } else {
+        portWarning = still.ok
+          ? `Port ${port} belongs to instance "${liveSlug}"; it was not killed.`
+          : `Port ${port} is still occupied by an unidentified service; it was not killed.`;
+      }
     }
   }
 
   removePidFile(slug);
-  await ClientApp.updateOne({ slug }, { $set: { processPid:null, processStatus:'stopped' } }).catch(()=>{});
-  return { ok:true, slug, port: port || null, pid: pid || null, killed };
+  const warning = [stalePidWarning, portWarning].filter(Boolean).join(' ');
+  await ClientApp.updateOne({ slug }, { $set: { processPid:null, processStatus: warning ? 'error' : 'stopped', lastError:warning } }).catch(()=>{});
+  return { ok:!warning, slug, port: port || null, pid: pid || null, killed, warning };
 }
 
 export async function startClientInstance(client, options = {}){
@@ -154,8 +202,15 @@ export async function startClientInstance(client, options = {}){
 
   const already = await checkInstanceHealth(port);
   if (already.ok) {
+    const liveSlug = normalizeTenantSlug(already.data?.instanceSlug || already.data?.tenantSlug || 'main');
+    if (liveSlug !== slug) {
+      throw new Error(`Port ${port} is occupied by instance "${liveSlug}", not "${slug}". Assign a free port before restarting.`);
+    }
     await ClientApp.updateOne({ slug }, { $set: { processStatus:'running', lastStartedAt:new Date(), lastError:'' } }).catch(()=>{});
-    return { ok:true, alreadyRunning:true, port, pid:client.processPid || null };
+    return { ok:true, alreadyRunning:true, port, pid:client.processPid || null, health:already };
+  }
+  if (already.occupied) {
+    throw new Error(`Port ${port} is occupied by a non-healthy or different service. Free the port or assign a new client port.`);
   }
 
   const dir = instanceDir(slug);
@@ -180,13 +235,29 @@ export async function startClientInstance(client, options = {}){
     NODE_ENV: 'production'
   };
 
-  const child = spawn(process.execPath, [SERVER_INDEX], {
-    cwd: path.join(APP_ROOT, 'server'),
-    env: childEnv,
-    detached: true,
-    stdio: ['ignore', out, out]
+  let child;
+  try {
+    child = spawn(process.execPath, [SERVER_INDEX], {
+      cwd: path.join(APP_ROOT, 'server'),
+      env: childEnv,
+      detached: true,
+      stdio: ['ignore', out, out]
+    });
+  } finally {
+    // The child inherited a duplicate descriptor; close the parent's copy.
+    try { fs.closeSync(out); } catch {}
+  }
+  child.on('error', err => {
+    removePidFileIfMatches(slug, child.pid);
+    ClientApp.updateOne({ slug, processPid:child.pid }, { $set: { processPid:null, processStatus:'error', lastError:`Failed to start client process: ${err.message}` } }).catch(()=>{});
+  });
+  child.on('exit', (code, signal) => {
+    removePidFileIfMatches(slug, child.pid);
+    const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+    ClientApp.updateOne({ slug, processPid:child.pid }, { $set: { processPid:null, processStatus: code === 0 ? 'stopped' : 'error', lastError: code === 0 ? '' : `Client process exited with ${reason}` } }).catch(()=>{});
   });
   child.unref();
+  if (!child.pid) throw new Error(`Client instance ${slug} could not be spawned`);
   fs.writeFileSync(path.join(dir, 'run.pid'), String(child.pid));
   await ClientApp.updateOne({ slug }, { $set: { processPid: child.pid, processStatus:'starting', lastStartedAt:new Date(), lastError:'' } }).catch(()=>{});
 
@@ -197,6 +268,12 @@ export async function startClientInstance(client, options = {}){
     // eslint-disable-next-line no-await-in-loop
     const health = await checkInstanceHealth(port);
     if (health.ok) {
+      const liveSlug = normalizeTenantSlug(health.data?.instanceSlug || health.data?.tenantSlug || 'main');
+      if (liveSlug !== slug) {
+        const conflict = `Port ${port} answered as instance "${liveSlug}" while starting "${slug}".`;
+        await ClientApp.updateOne({ slug }, { $set: { processStatus:'error', lastError:conflict } }).catch(()=>{});
+        return { ok:false, port, pid:child.pid, error:conflict, health };
+      }
       await ClientApp.updateOne({ slug }, { $set: { processStatus:'running', lastStartedAt:new Date(), lastError:'' } }).catch(()=>{});
       return { ok:true, port, pid:child.pid, health };
     }
@@ -265,13 +342,18 @@ function proxyHttpToPort(req, res, port, targetPath, slug){
     headers['content-length'] = String(body.length);
   }
 
+  const configuredProxyTimeout = Number(process.env.CLIENT_PROXY_TIMEOUT_MS || 300000);
+  const proxyTimeoutMs = Number.isFinite(configuredProxyTimeout)
+    ? Math.max(120000, configuredProxyTimeout)
+    : 300000;
+
   const proxyReq = http.request({
     host: '127.0.0.1',
     port,
     method: req.method,
     path: targetPath || '/',
     headers,
-    timeout: 120000
+    timeout: proxyTimeoutMs
   }, proxyRes => {
     res.statusCode = proxyRes.statusCode || 502;
     for (const [k, v] of Object.entries(proxyRes.headers || {})) {

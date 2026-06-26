@@ -5,7 +5,7 @@ export const JobLogSchema = new mongoose.Schema({
   action: {
     type: String,
     enum: [
-      'ping','run','schedule','queue-bulk','queue-sync','settings','history','gemini-test','prompt','plugins',
+      'ping','run','schedule','queue-bulk','queue-sync','settings','history','gemini-test','prompt','prompt-ai-generate','prompt-ai-activate','plugins',
       'plugin-upload','plugin-activate','plugin-deactivate','plugin-reactivate','plugin-delete'
     ],
     required: true,

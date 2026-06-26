@@ -4,6 +4,11 @@ import { asyncHandler, isObjectId, validateQueueItems, wpEndpoint } from '../lib
 
 const router = express.Router();
 
+function bridgeTimeout(fallback){
+  const value = Number(process.env.BRIDGE_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? Math.max(1000, value) : fallback;
+}
+
 async function findSiteOr404(req, siteId, res){
   const { Site } = req.models;
   if (!isObjectId(siteId)) { res.status(400).json({ error:'valid siteId required' }); return null; }
@@ -16,7 +21,7 @@ router.get('/', asyncHandler(async (req,res)=>{
   const site = await findSiteOr404(req, req.query.siteId, res);
   if (!site) return;
   const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue');
-  const r = await fetchWithTimeout(u, { headers:{ 'x-api-key': site.apiKey } }, Number(process.env.BRIDGE_TIMEOUT_MS || 30000));
+  const r = await fetchWithTimeout(u, { headers:{ 'x-api-key': site.apiKey } }, bridgeTimeout(30000));
   res.json(await readBridgeResponse(r));
 }));
 
@@ -27,7 +32,7 @@ router.post('/append', asyncHandler(async (req,res)=>{
   const site = await findSiteOr404(req, req.body?.siteId, res);
   if (!site) return;
   const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/append');
-  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ items }) }, Number(process.env.BRIDGE_TIMEOUT_MS || 45000));
+  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ items }) }, bridgeTimeout(45000));
   const data = await readBridgeResponse(r);
   await JobLog.create({ siteId: site._id, action:'queue-bulk', status:'success', message:`Uploaded ${items.length} queue rows`, payload: data });
   res.json(data);
@@ -43,7 +48,7 @@ router.post('/sync', asyncHandler(async (req,res)=>{
   const mode = allowedModes.has(req.body?.mode) ? req.body.mode : 'smart';
   const skipPublished = req.body?.skipPublished === true;
   const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/sync');
-  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ items, mode, skipPublished, source: 'dashboard-v12-multiclient', tenantSlug: req.tenantSlug }) }, Number(process.env.BRIDGE_TIMEOUT_MS || 60000));
+  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ items, mode, skipPublished, source: 'dashboard-v18.3', tenantSlug: req.tenantSlug }) }, bridgeTimeout(60000));
   const data = await readBridgeResponse(r);
   await JobLog.create({ siteId: site._id, action:'queue-sync', status:'success', message:`CSV ${mode}: added ${data.added ?? 0}, updated ${data.updated ?? 0}, removed ${data.removed ?? 0}, skipped ${data.skippedPublished ?? 0}, queue ${data.queueCount ?? '?'}`, payload: data });
   res.json(data);
@@ -53,7 +58,7 @@ router.post('/clear', asyncHandler(async (req,res)=>{
   const site = await findSiteOr404(req, req.body?.siteId, res);
   if (!site) return;
   const u = wpEndpoint(site.url, '/wp-json/grb/v1/queue/clear');
-  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ all: true }) }, Number(process.env.BRIDGE_TIMEOUT_MS || 30000));
+  const r = await fetchWithTimeout(u, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey }, body: JSON.stringify({ all: true }) }, bridgeTimeout(30000));
   res.json(await readBridgeResponse(r));
 }));
 

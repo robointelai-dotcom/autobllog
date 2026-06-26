@@ -59,7 +59,7 @@ async function req(path, options={}){
   if(!r.ok){
     let message = typeof payload === 'object' ? (payload.error || payload.message || JSON.stringify(payload)) : String(payload || '')
     if (/Cannot\s+(GET|POST|PUT|DELETE)\s+\/api\//i.test(message) || /<!doctype html/i.test(message)) {
-      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v18, restart Node from /opt/autoblog/server, then hard refresh browser.'
+      message = 'Dashboard backend route missing: '+apiPath(path)+'. Update to v18.3, restart Node from /opt/autoblog/server, then hard refresh browser.'
     }
     throw new Error(message || r.statusText)
   }
@@ -471,10 +471,10 @@ function AddSite({onAdded,notify}){
   }
   return <div className="card">
     <div className="card-head"><div><h2>Add WordPress site</h2><p>Use the same API key saved in the WP Remote Bridge plugin.</p></div></div>
-    <form onSubmit={submit} className="form-grid add-site-form">
-      <label>Site name<input required placeholder="Example: Main Blog" value={f.name} onChange={e=>set({...f,name:e.target.value})}/></label>
-      <label>Site URL<input required placeholder="https://example.com" value={f.url} onChange={e=>set({...f,url:e.target.value})}/></label>
-      <label>Bridge API key<input required type="password" placeholder="x-api-key" value={f.apiKey} onChange={e=>set({...f,apiKey:e.target.value})}/></label>
+    <form onSubmit={submit} className="form-grid add-site-form" autoComplete="off">
+      <label>Site name<input required name="ab_site_name" autoComplete="off" placeholder="Example: Main Blog" value={f.name} onChange={e=>set({...f,name:e.target.value})}/></label>
+      <label>Site URL<input required type="url" name="ab_wordpress_url" autoComplete="off" inputMode="url" placeholder="https://example.com" value={f.url} onChange={e=>set({...f,url:e.target.value})}/></label>
+      <label>Bridge API key<input required type="password" name="ab_bridge_api_key" autoComplete="new-password" placeholder="x-api-key" value={f.apiKey} onChange={e=>set({...f,apiKey:e.target.value})}/></label>
       <button disabled={busy} className="btn primary">{busy?'Adding...':'Add site'}</button>
     </form>
   </div>
@@ -636,7 +636,7 @@ function ApiKeys({sites,refresh,notify}){
   const [dashboardOnlyKey,setDashboardOnlyKey]=useState('')
   const [verifyDashboardKey,setVerifyDashboardKey]=useState(true)
   const [geminiKey,setGeminiKey]=useState('')
-  const [geminiModel,setGeminiModel]=useState('gemini-2.0-flash')
+  const [geminiModel,setGeminiModel]=useState('gemini-2.5-flash')
   const [cronEnabled,setCronEnabled]=useState(false)
   const selected = sites.find(s=>s._id===siteId)
 
@@ -651,7 +651,7 @@ function ApiKeys({sites,refresh,notify}){
     try{
       const r = await req('/api/sites/'+siteId+'/wp-settings')
       setSettings(r)
-      setGeminiModel(r.geminiModel || 'gemini-2.0-flash')
+      setGeminiModel(r.geminiModel || 'gemini-2.5-flash')
       setCronEnabled(!!r.cronEnabled)
       if(showToast) notify('Remote API status loaded.', 'success')
     }catch(e){ notify(e.message, 'error') }
@@ -690,7 +690,7 @@ function ApiKeys({sites,refresh,notify}){
   }
 
   function geminiPayload(includeKey=true){
-    const payload = { geminiModel: geminiModel || 'gemini-2.0-flash', cronEnabled }
+    const payload = { geminiModel: geminiModel || 'gemini-2.5-flash', cronEnabled }
     if(includeKey && geminiKey.trim()) payload.geminiApiKey = geminiKey.trim()
     return payload
   }
@@ -779,7 +779,7 @@ function ApiKeys({sites,refresh,notify}){
       <div className="card key-card">
         <div className="card-head"><div><h2>Update Gemini API settings</h2><p>This updates the SEM SEO BLOGER Gemini key/model on the selected WordPress site through the Bridge.</p></div></div>
         <label>New Gemini API key<input type="password" value={geminiKey} placeholder="Leave blank to keep existing key" onChange={e=>setGeminiKey(e.target.value)} /></label>
-        <label>Gemini model<input value={geminiModel} placeholder="gemini-2.0-flash" onChange={e=>setGeminiModel(e.target.value)} /></label>
+        <label>Gemini model<input value={geminiModel} placeholder="gemini-2.5-flash" onChange={e=>setGeminiModel(e.target.value)} /></label>
         <label className="inline-check verify-check"><input type="checkbox" checked={cronEnabled} onChange={e=>setCronEnabled(e.target.checked)} /> Enable WordPress internal cron fallback</label>
         <div className="right"><button className="btn" disabled={!siteId||busy} onClick={testGemini}>Test key</button><button className="btn primary" disabled={!siteId||busy} onClick={saveGemini}>Save Gemini settings</button><button className="btn glow" disabled={!siteId||busy} onClick={saveGeminiAndTest}>Save + Test</button><button className="btn danger" disabled={!siteId||busy} onClick={clearGemini}>Clear Gemini key</button></div>
       </div>
@@ -804,9 +804,9 @@ function PromptStudio({sites,notify}){
   const [preview,setPreview]=useState('')
   const [sample,setSample]=useState({topic:'Best demat account for beginners',keyword:'best demat account'})
   const [ai,setAi]=useState({
-    focus:'SEO blog article', businessType:'', audience:'Indian readers and potential customers', language:'English',
-    tone:'professional, helpful, trustworthy and easy to understand', wordCount:1500, compliance:'finance', extraRules:'',
-    includeFaq:true, includeTable:false, includeConclusion:true, includeBacklink:true, geminiApiKey:'', geminiModel:'gemini-2.5-flash', cronEnabled:true
+    focus:'SEO blog article', businessType:'', audience:'readers and potential customers', language:'English',
+    tone:'professional, helpful, trustworthy and easy to understand', wordCount:1500, compliance:'general', extraRules:'',
+    includeFaq:true, includeTable:false, includeConclusion:true, includeBacklink:true, geminiApiKey:'', geminiModel:'gemini-2.5-flash', cronEnabled:false
   })
   const selected = sites.find(s=>s._id===siteId)
 
@@ -912,7 +912,7 @@ function PromptStudio({sites,notify}){
   return <div className="prompt-page">
     <section className="hero prompt-hero">
       <div>
-        <span className="eyebrow">Prompt Studio v18</span>
+        <span className="eyebrow">Prompt Studio v18.3</span>
         <h1>Generate, validate, and activate safe Gemini blog prompts per site.</h1>
         <p>Use AI Prompt Wizard to create a careful site-specific prompt. Every WordPress site and every fresh client app can keep a different prompt, Gemini key, cron setting, and CSV queue.</p>
         <div className="hero-actions"><button className="btn primary" disabled={!siteId||busy} onClick={loadPrompt}>{busy?'Loading...':'Load prompt'}</button><button className="btn glow" disabled={!siteId||busy} onClick={generateAiPrompt}>AI Generate Prompt</button><button className="btn primary" disabled={!siteId||busy} onClick={activateAiAutoblog}>Save + Activate AI Auto Generate</button><button className="btn danger" disabled={!siteId||busy} onClick={resetPrompt}>Reset default</button></div>
@@ -949,13 +949,13 @@ function PromptStudio({sites,notify}){
           <label className="inline-check"><input type="checkbox" checked={ai.includeFaq} onChange={e=>setAi({...ai,includeFaq:e.target.checked})}/> FAQ section</label>
           <label className="inline-check"><input type="checkbox" checked={ai.includeTable} onChange={e=>setAi({...ai,includeTable:e.target.checked})}/> Allow comparison table</label>
           <label className="inline-check"><input type="checkbox" checked={ai.includeBacklink} onChange={e=>setAi({...ai,includeBacklink:e.target.checked})}/> Use $backlink once</label>
-          <label className="inline-check"><input type="checkbox" checked={ai.cronEnabled} onChange={e=>setAi({...ai,cronEnabled:e.target.checked})}/> Enable auto cron when activating</label>
+          <label className="inline-check"><input type="checkbox" checked={ai.cronEnabled} onChange={e=>setAi({...ai,cronEnabled:e.target.checked})}/> Enable WordPress internal cron fallback</label>
         </div>
         <div className="right"><button className="btn glow" disabled={!siteId||busy} onClick={generateAiPrompt}>AI Generate Prompt</button><button className="btn primary" disabled={!siteId||busy} onClick={activateAiAutoblog}>Save + Activate AI Auto Generate</button></div>
       </div>
 
       <div className="card prompt-editor-card">
-        <div className="card-head"><div><h2>Prompt editor</h2><p>Review before saving. Required variables: $topic and $keyword. Optional: $backlink. CSV can also include a Prompt column for per-post override.</p></div></div>
+        <div className="card-head"><div><h2>Prompt editor</h2><p>Review before saving. Required variables: $topic and $keyword. Optional: $backlink. CSV can also include a Prompt column as an extra per-post instruction; it cannot replace the site safety rules.</p></div></div>
         <textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={'Example:\nWrite a 1500+ word SEO article about "$topic". Include "$keyword" naturally. Return clean HTML only.'}></textarea>
         <div className="prompt-toolbar">
           <button className="btn small-btn" onClick={()=>insertSnippet('Use educational wording only. Do not provide personalised financial advice, guarantee returns, or promise profit.')}>Add compliance line</button>
@@ -1175,7 +1175,7 @@ function Logs({notify}){
   useEffect(()=>{ load() },[filter.status, filter.action])
   return <div className="card">
     <div className="card-head"><div><h2>Execution logs</h2><p>Use logs to catch bridge, queue, Gemini, or WordPress errors fast.</p></div><button className="btn" onClick={load}>Refresh</button></div>
-    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option><option value="prompt">prompt</option><option value="plugins">plugins</option><option value="plugin-upload">plugin-upload</option><option value="plugin-activate">plugin-activate</option><option value="plugin-deactivate">plugin-deactivate</option><option value="plugin-reactivate">plugin-reactivate</option><option value="plugin-delete">plugin-delete</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
+    <div className="filters"><input placeholder="Filter siteId" value={filter.siteId} onChange={e=>set(f=>({...f,siteId:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')load()}}/><select value={filter.action} onChange={e=>set(f=>({...f,action:e.target.value}))}><option value="">Any action</option><option value="run">run</option><option value="ping">ping</option><option value="schedule">schedule</option><option value="queue-bulk">queue-bulk</option><option value="queue-sync">queue-sync</option><option value="settings">settings</option><option value="history">history</option><option value="gemini-test">gemini-test</option><option value="prompt">prompt</option><option value="prompt-ai-generate">prompt-ai-generate</option><option value="prompt-ai-activate">prompt-ai-activate</option><option value="plugins">plugins</option><option value="plugin-upload">plugin-upload</option><option value="plugin-activate">plugin-activate</option><option value="plugin-deactivate">plugin-deactivate</option><option value="plugin-reactivate">plugin-reactivate</option><option value="plugin-delete">plugin-delete</option></select><select value={filter.status} onChange={e=>set(f=>({...f,status:e.target.value}))}><option value="">Any status</option><option value="success">success</option><option value="error">error</option><option value="skipped">skipped</option></select></div>
     <div className="table-wrap"><table><thead><tr><th>When</th><th>Site</th><th>Action</th><th>Status</th><th>Message</th></tr></thead><tbody>{logs.map(l=><tr key={l._id}><td><small>{new Date(l.createdAt).toLocaleString()}</small></td><td className="small">{l.siteId}</td><td>{l.action}</td><td><span className={'badge '+(l.status==='success'?'success':l.status==='skipped'?'neutral':'error')}>{l.status}</span></td><td className="small log-message">{l.message}</td></tr>)}</tbody></table></div>
   </div>
 }
@@ -1187,11 +1187,11 @@ function DashboardApp({user,onLogout,onChangedUser,themeValue,setTheme,notify}){
 
   return <div className={"layout theme-"+themeValue}>
     <aside>
-      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v18</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
+      <div className="brand"><span className="brand-mark">✦</span><div><b>Remote Controller Pro v18.3</b><small>{CLIENT_SLUG==='main'?'Main App':'Client: /'+CLIENT_SLUG}</small></div></div>
       <ThemeStudio theme={themeValue} setTheme={setTheme}/>
       <nav><button className={tab==='dash'?'active':''} onClick={()=>setTab('dash')}><Icon name="dash"/> Dashboard</button>{CLIENT_SLUG==='main' && <button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}><Icon name="sites"/> Clients</button>}<button className={tab==='sites'?'active':''} onClick={()=>setTab('sites')}><Icon name="sites"/> Sites</button><button className={tab==='queue'?'active':''} onClick={()=>setTab('queue')}><Icon name="queue"/> Queue</button><button className={tab==='prompt'?'active':''} onClick={()=>setTab('prompt')}><Icon name="prompt"/> Prompt Studio</button><button className={tab==='history'?'active':''} onClick={()=>setTab('history')}><Icon name="history"/> Blog History</button><button className={tab==='plugins'?'active':''} onClick={()=>setTab('plugins')}><Icon name="plugins"/> Plugins</button><button className={tab==='keys'?'active':''} onClick={()=>setTab('keys')}><Icon name="key"/> API Keys</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><Icon name="key"/> Security</button><button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}><Icon name="logs"/> Logs</button></nav>
       <AdminKeyBox notify={notify}/>
-      <footer>v18 Random Hourly Scheduler • AI Prompt Wizard</footer>
+      <footer>v18.3 Deep Stability Fix • Safe Client Routing • Atomic Publishing Locks</footer>
     </aside>
     <main>
       <header><div><span className="small">{loading?'Refreshing...':'Ready'} • {user?.username}</span><h1>{title}</h1></div><div className="header-actions"><button className="btn" onClick={refresh}>Refresh sites</button><button className="btn danger" onClick={onLogout}>Logout</button></div></header>

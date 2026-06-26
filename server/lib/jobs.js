@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { fetchWithTimeout, readBridgeResponse } from './http.js';
 import { DEFAULT_TENANT, getTenantModels, normalizeTenantSlug } from './tenants.js';
 import { isValidTimeHHMM, isValidTimezone, wpEndpoint } from './utils.js';
@@ -75,19 +76,27 @@ export async function scheduleNextRandomHourly(agenda, site, tenantSlug = DEFAUL
 
 async function runV5Bridge(site, tenantSlug, note = 'dashboard-schedule'){
   const endpoint = wpEndpoint(site.url, '/wp-json/grb/v1/run');
-  const attempts = Math.max(1, Math.min(5, Number(process.env.BRIDGE_RETRIES || 2)));
+  const attempts = clampNumber(process.env.BRIDGE_RETRIES, 1, 5, 2);
+  // Reuse one request ID for every retry. Bridge v2.8+ caches this ID so a
+  // timeout after a successful publish cannot create a duplicate post.
+  const requestId = crypto.randomUUID();
+  const configuredRunTimeout = Number(process.env.BRIDGE_RUN_TIMEOUT_MS || process.env.BRIDGE_TIMEOUT_MS || 240000);
+  const runTimeoutMs = Number.isFinite(configuredRunTimeout) ? Math.max(240000, configuredRunTimeout) : 240000;
   let lastErr;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const res = await fetchWithTimeout(endpoint, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'x-api-key': site.apiKey },
-        body: JSON.stringify({ siteId: site._id.toString(), note, tenantSlug })
-      }, Number(process.env.BRIDGE_TIMEOUT_MS || 45000));
+        body: JSON.stringify({ siteId: site._id.toString(), note, tenantSlug, requestId })
+      }, runTimeoutMs);
       return await readBridgeResponse(res);
     } catch (err) {
       lastErr = err;
-      if (attempt < attempts) await new Promise(r => setTimeout(r, 1000 * attempt));
+      const status = Number(err?.status || 0);
+      const retryable = status === 0 || status === 408 || status === 429 || status >= 500;
+      if (!retryable || attempt >= attempts) throw err;
+      await new Promise(r => setTimeout(r, Math.min(5000, 1000 * attempt)));
     }
   }
   throw lastErr;
@@ -98,7 +107,7 @@ export async function ensureSiteSchedule(agenda, site, manualOnly=false, tenantS
   const safeTenant = normalizeTenantSlug(tenantSlug);
   const { JobLog, Site } = getTenantModels(safeTenant);
   const sid = site._id.toString();
-  await agenda.cancel({ name: 'run-v5-bridge', 'data.siteId': sid, 'data.tenantSlug': safeTenant });
+  await agenda.cancel({ name: 'run-v5-bridge', 'data.siteId': sid, 'data.tenantSlug': safeTenant, 'data.manual': { $ne: true } });
   await agenda.cancel({ name: 'run-v5-bridge-random-hourly', 'data.siteId': sid, 'data.tenantSlug': safeTenant });
   await Site.updateOne({ _id: site._id }, { $set: { nextRandomRunAt: null } }).catch(()=>{});
 
@@ -115,8 +124,8 @@ export async function ensureSiteSchedule(agenda, site, manualOnly=false, tenantS
     return;
   }
 
-  const job = agenda.create('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant });
-  job.unique({ 'data.siteId': sid, 'data.tenantSlug': safeTenant }, { insertOnly: true });
+  const job = agenda.create('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant, manual: false });
+  job.unique({ name: 'run-v5-bridge', 'data.siteId': sid, 'data.tenantSlug': safeTenant, 'data.manual': false }, { insertOnly: true });
 
   if (mode === 'everySeconds') {
     const seconds = Math.max(1, Math.min(100000000, Number(site.everySeconds || 0)));
@@ -142,7 +151,7 @@ export async function ensureSiteSchedule(agenda, site, manualOnly=false, tenantS
 
   await job.save();
   await JobLog.create({ siteId: site._id, action:'schedule', status:'success', message:`Schedule saved: ${mode}` }).catch(()=>{});
-  if (process.env.RUN_IMMEDIATE_ON_SAVE === 'true' && mode !== 'once') await agenda.now('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant, force: true });
+  if (process.env.RUN_IMMEDIATE_ON_SAVE === 'true' && mode !== 'once') await agenda.now('run-v5-bridge', { siteId: sid, tenantSlug: safeTenant, force: true, manual: false, scheduledBy: 'save' });
 }
 
 async function executeBridgeRun({ siteId, tenantSlug = DEFAULT_TENANT, force = false, note = 'dashboard-schedule' }){
@@ -177,7 +186,7 @@ async function executeBridgeRun({ siteId, tenantSlug = DEFAULT_TENANT, force = f
       await JobLog.create({ siteId: site._id, action:'run', status:'skipped', message: out?.result?.message || out?.message || 'Bridge skipped run', payload: out });
       return { skipped: true, reason: 'bridge-skipped', payload: out };
     }
-    await JobLog.create({ siteId: site._id, action:'run', status:'success', message: out?.message || out?.result?.title || 'Posted via bridge', payload: out });
+    await JobLog.create({ siteId: site._id, action:'run', status:'success', message: out?.result?.title || out?.message || 'Posted via bridge', payload: out });
     await Site.updateOne({ _id: site._id }, { $inc: { 'counters.sent': 1, todayCount: 1 }, $set:{ lastSuccessAt: new Date(), todayKey }, $unset:{ lastErrorAt: '' } });
     return { ok: true, payload: out };
   }catch(err){
@@ -188,12 +197,12 @@ async function executeBridgeRun({ siteId, tenantSlug = DEFAULT_TENANT, force = f
 }
 
 export function defineJobs(agenda){
-  const CONC = Math.max(1, Math.min(100, Number(process.env.JOB_CONCURRENCY || process.env.PUSH_CONCURRENCY || 5)));
-  const lockLifetime = Math.max(60000, Number(process.env.AGENDA_LOCK_MS || 600000));
+  const CONC = clampNumber(process.env.JOB_CONCURRENCY || process.env.PUSH_CONCURRENCY, 1, 100, 5);
+  const lockLifetime = clampNumber(process.env.AGENDA_LOCK_MS, 60000, 24 * 60 * 60 * 1000, 600000);
 
   agenda.define('run-v5-bridge', { concurrency: CONC, lockLifetime }, async (job) => {
-    const { siteId, tenantSlug = DEFAULT_TENANT, force = false } = job.attrs.data || {};
-    await executeBridgeRun({ siteId, tenantSlug, force, note: force ? 'manual-trigger' : 'dashboard-schedule' });
+    const { siteId, tenantSlug = DEFAULT_TENANT, force = false, manual = false } = job.attrs.data || {};
+    await executeBridgeRun({ siteId, tenantSlug, force, note: manual ? 'manual-trigger' : (force ? 'save-trigger' : 'dashboard-schedule') });
   });
 
   agenda.define('run-v5-bridge-random-hourly', { concurrency: CONC, lockLifetime }, async (job) => {

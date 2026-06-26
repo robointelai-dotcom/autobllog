@@ -1,15 +1,60 @@
-AutoBlog Pro v18 Random Hourly Scheduler install steps
+AUTOBLOG PRO V18.3 DEEP STABILITY FIX — INSTALL
 
-1. Push the dashboard code to GitHub using GITHUB-SERVER-UPDATE-COMMANDS.txt.
-2. Pull the latest code on VPS /opt/autoblog.
-3. Reinstall server and client dependencies.
-4. Run client build.
-5. Restart main backend and client instance backends.
-6. Open https://domaincontroller.in/?v=18 and hard refresh.
-7. Go to Sites and choose Random hourly schedule mode.
+A. BACKUP FIRST
+1. Back up the WordPress files and database.
+2. Back up /opt/autoblog, /opt/autoblog/server/.env, and /opt/autoblog/server/data.
+3. Do not delete the existing .env or data directories during the code update.
 
-For 1 post per hour with random timing:
-- Mode: Random hourly
-- Random hrs: 1
-- Random minute min: 0
-- Random minute max: 59
+B. WORDPRESS PLUGINS
+1. WordPress Admin -> Plugins -> Add New -> Upload Plugin.
+2. Upload sem-seo-bloger-v5.6.0-deep-stability-fix.zip.
+3. Choose Replace current with uploaded, then Activate.
+4. Upload wp-gamini-remote-bridge-v2.8.0-deep-stability-fix.zip.
+5. Choose Replace current with uploaded, then Activate.
+6. Confirm WordPress shows only one active SEM SEO BLOGER and one active Remote Bridge.
+7. Open AutoBlog Bridge. Confirm SEM SEO BLOGER is Ready and copy the Bridge key.
+
+C. DASHBOARD APPLICATION
+1. Extract autobllog-main-v18.3-deep-stability-fix.zip to a temporary directory.
+2. Copy its application files into /opt/autoblog, but preserve:
+   - /opt/autoblog/server/.env
+   - /opt/autoblog/server/data
+3. Compare your .env with server/.env.example. Recommended additions/updates:
+   BRIDGE_TIMEOUT_MS=30000
+   BRIDGE_RUN_TIMEOUT_MS=240000
+   BRIDGE_AI_TIMEOUT_MS=90000
+   BRIDGE_UPLOAD_TIMEOUT_MS=180000
+   JSON_LIMIT=16mb
+   PLUGIN_UPLOAD_JSON_LIMIT=96mb
+   CLIENT_PROXY_TIMEOUT_MS=300000
+4. Install/build:
+   cd /opt/autoblog/server && npm ci --omit=dev --no-audit --no-fund
+   cd /opt/autoblog/client && npm ci --no-audit --no-fund && npm run build
+5. Restart only the process manager already used on your server: PM2, systemd, or nohup. Do not run two copies on port 4000.
+6. Test locally:
+   curl -fsS http://127.0.0.1:4000/api/healthz
+   Confirm appVersion is v18.3-deep-stability-fix.
+7. Check Nginx has client_max_body_size 100m and proxy_read_timeout/proxy_send_timeout 300s.
+8. Run nginx -t, reload Nginx, and hard refresh the browser with Ctrl+Shift+R.
+
+D. FINAL LIVE TEST
+1. Sign in and immediately change the temporary dashboard password in Security if it is still the default.
+2. Sites -> confirm the correct WordPress root URL and Bridge key -> Ping.
+3. API Keys / Remote Status -> confirm:
+   - bridgeVersion: 2.8.0
+   - semPluginVersion: 5.6.0
+   - categoryRuntimeReady: true
+   - publisherRuntimeReady: true
+4. Test the saved Gemini key/model. Default model is gemini-2.5-flash.
+5. Sync a CSV containing one unique test keyword.
+6. Click Run One once. A second rapid click should say the run is already queued/running rather than enqueueing another post.
+7. Wait for completion. Confirm:
+   - one success log with the post title
+   - exactly one WordPress post
+   - exactly one featured image
+   - correct category/tags/meta description
+   - queue count reduced by one
+8. Test one client path such as /global1/ and confirm it loads its own login/database without a blank page or 504.
+9. Test plugin listing only. Use remote plugin upload/delete only after a fresh backup.
+
+The supplied release passed local syntax, build, dependency-audit, archive-integrity, and smoke tests. A live WordPress/VPS test is still required because hosting permissions, Nginx/Cloudflare rules, database state, active third-party plugins, and API credentials cannot be reproduced locally.

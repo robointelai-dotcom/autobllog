@@ -1,28 +1,33 @@
-# v17-ai-prompt-wizard
+# AutoBlog Pro release history
 
-- Added AI Prompt Wizard in Prompt Studio.
-- Added backend endpoint: POST /api/sites/:id/prompt/generate.
-- Added backend endpoint: POST /api/sites/:id/prompt/activate-ai.
-- Added safe prompt generator and prompt validation logic.
-- Added bridge endpoint: POST /wp-json/grb/v1/prompt/generate.
-- Bridge v17 can use the Gemini key already saved in WordPress.
-- Added CSV per-post Prompt column support across dashboard, bridge, and SEM SEO BLOGER plugin.
-- SEM SEO BLOGER now passes row-level prompt override to Gemini generation.
-- Strengthened default finance/SEBI-safe prompt restrictions.
-- Preserved v16 fresh client backend/login proxy behavior.
+## v18.3 — Deep Stability Fix
 
-## v18-random-hourly-scheduler
-- Added Random hourly schedule mode.
-- Supports 1 post every N hours with random minute and second inside that hour block.
-- Added randomHours, randomMinuteMin, randomMinuteMax and nextRandomRunAt site fields.
-- Random hourly jobs reschedule themselves after each run.
-- Kept v17 AI Prompt Wizard and v16 fresh client backend proxy fixes.
+- Fixed category creation during REST/cron publishing.
+- Added atomic publishing, Bridge request, and CSV queue locks.
+- Added rapid manual-trigger and Browser Auto overlap protection.
+- Added safe long publisher timeout, retry idempotency, recent-crash duplicate cleanup, and queue refresh after publishing.
+- Fixed per-row prompt precedence, `skipPublished`, failed image/draft cleanup, multipart Gemini parsing, and secret redaction.
+- Hardened Bridge permissions and plugin lifecycle actions.
+- Added same-origin CORS defaults, login throttling, session reset after credential changes, safe client port ownership checks, and relative subpath assets.
+- Added route-specific plugin upload size/timeouts and improved child-instance proxy timing.
+- Added owner-token publisher locks so an expired older request cannot release a newer run lock.
+- Added 5,000-row queue safety limits and safe handling for missing/malformed REST JSON.
+- Made Bridge settings changes transactional and added dashboard recovery after an interrupted API-key rotation.
+- Rejected short Bridge keys in WordPress admin without disconnecting the current dashboard.
+- Hardened URL/schedule/env validation, mapped bad JSON and duplicate database records to controlled HTTP errors, and redacted secrets from API logs.
+- Added stale PID ownership checks so a reused Linux PID cannot terminate an unrelated process.
+- Lazy-loaded WordPress media libraries only when a featured image is actually attached.
 
-# v18-random-hourly-scheduler
+## v18.2 — Publisher Runtime Fix
 
-- Added Random hourly schedule mode.
-- Added randomHours, randomMinuteMin, randomMinuteMax, and nextRandomRunAt site fields.
-- Scheduler now creates one one-time Agenda job per site, then re-schedules the next random run after each execution.
-- Use Random hrs = 1 for one post per hour with random minute/second timing.
-- Added UI controls in Sites table for random hourly interval and minute range.
-- Preserved v17 AI Prompt Wizard and v16 client login proxy fixes.
+- Replaced the unavailable admin-only category helper with runtime-safe taxonomy functions.
+- Added initial retry request IDs, Gemini 2.5 migration, image cleanup, and frontend dependency refresh.
+
+## v18 — Random Hourly Scheduler
+
+- Added one post every N hours with a random minute/second.
+- Added randomHours, randomMinuteMin, randomMinuteMax, and nextRandomRunAt.
+
+## v17 — AI Prompt Wizard
+
+- Added Prompt Studio AI generation, site prompts, CSV per-post Prompt support, and safe prompt validation.

@@ -1,6 +1,6 @@
-import { fetchWithTimeout } from './http.js';
+import { fetchWithTimeout, redactSecrets } from './http.js';
 
-export const PROMPT_VERSION = 'v17-ai-prompt-wizard';
+export const PROMPT_VERSION = 'v18.3-safe-publisher';
 
 export function safeTrim(value, max = 1200){
   return String(value ?? '')
@@ -35,7 +35,8 @@ export function buildSafePromptTemplate(input = {}){
   const audience = safeTrim(input.audience || 'readers and potential customers', 240);
   const language = safeTrim(input.language || 'English', 80);
   const tone = safeTrim(input.tone || 'professional, helpful, trustworthy and easy to understand', 180);
-  const wordCount = Math.max(700, Math.min(5000, Number(input.wordCount || 1500)));
+  const requestedWordCount = Number(input.wordCount || 1500);
+  const wordCount = Number.isFinite(requestedWordCount) ? Math.max(700, Math.min(5000, requestedWordCount)) : 1500;
   const extraRules = safeTrim(input.extraRules || '', 2000);
   const compliance = String(input.compliance || 'general').toLowerCase();
   const includeFaq = input.includeFaq !== false;
@@ -47,7 +48,7 @@ export function buildSafePromptTemplate(input = {}){
   compliance === 'medical' ? `\nHealth content restrictions:\n- Write educational information only. Do not diagnose, prescribe, or claim guaranteed results.\n- Tell readers to consult a qualified professional for personal medical decisions.\n- Avoid unsafe dosage, treatment, or emergency claims.` :
   `\nSafety restrictions:\n- Do not invent facts, statistics, awards, prices, legal claims, medical claims, or financial guarantees.\n- If exact data is unknown, use cautious wording and avoid fake numbers.\n- Avoid adult, hateful, illegal, deceptive, or harmful content.`;
 
-  return `You are an expert SEO blog writer and careful content editor for ${businessType}.\n\nTask:\nWrite a complete, high-quality ${focus} about "$topic". The primary SEO keyword is "$keyword".\n\nAudience and tone:\n- Audience: ${audience}.\n- Language: ${language}.\n- Tone: ${tone}.\n\nSEO requirements:\n- Target length: ${wordCount}+ words unless the topic needs a shorter direct answer.\n- Use "$keyword" naturally in the SEO title, introduction, at least one subheading, and conclusion.\n- Include semantic related terms naturally. Do not keyword-stuff.\n- Create a clear search-intent structure that answers the topic fully.\n- Add practical examples, steps, benefits, mistakes to avoid, and decision guidance where relevant.\n\nRequired output format:\n- Return clean HTML only.\n- Start with exactly one <p> containing the meta description, 150-160 characters.\n- Then output exactly one <h1> SEO title, ideally 50-60 characters.\n- Then write the article using only these tags: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>.\n- Do not output markdown, JSON, code fences, CSS, JavaScript, tables of contents with anchor scripts, emojis, or labels like "Title:" or "Meta Description:".\n${includeTable ? '- Include one simple comparison table only if it genuinely helps the reader. Use clean HTML table tags.\n' : '- Do not use HTML tables unless absolutely necessary.\n'}${includeFaq ? '- Include a helpful FAQ section near the end with 4-6 questions and direct answers.\n' : ''}${includeConclusion ? '- End with a useful conclusion and a soft, non-misleading call to action.\n' : ''}${includeBacklink ? '- If $backlink is provided and it is a valid URL, include it naturally exactly once as a contextual link. If no backlink is provided, do not mention it.\n' : ''}${complianceBlock}\n\nQuality control before final answer:\n- Check that the content matches "$topic" and "$keyword".\n- Check that there is one meta description paragraph and one H1.\n- Check that no restricted or fake claim is included.\n- Check that the HTML is clean and ready for WordPress publishing.\n${extraRules ? `\nExtra site-specific rules:\n${extraRules}\n` : ''}`;
+  return `You are an expert SEO blog writer and careful content editor for ${businessType}.\n\nTask:\nWrite a complete, high-quality ${focus} about "$topic". The primary SEO keyword is "$keyword".\n\nAudience and tone:\n- Audience: ${audience}.\n- Language: ${language}.\n- Tone: ${tone}.\n\nSEO requirements:\n- Target length: ${wordCount}+ words unless the topic needs a shorter direct answer.\n- Use "$keyword" naturally in the SEO title, introduction, at least one subheading, and conclusion.\n- Include semantic related terms naturally. Do not keyword-stuff.\n- Create a clear search-intent structure that answers the topic fully.\n- Add practical examples, steps, benefits, mistakes to avoid, and decision guidance where relevant.\n\nRequired output format:\n- Return clean HTML only.\n- Start with exactly one <p> containing the meta description, 150-160 characters.\n- Then output exactly one <h1> SEO title, ideally 50-60 characters.\n- Then write the article using these tags: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>${includeTable ? ', <table>, <thead>, <tbody>, <tr>, <th>, <td>' : ''}.\n- Do not output markdown, JSON, code fences, CSS, JavaScript, tables of contents with anchor scripts, emojis, or labels like "Title:" or "Meta Description:".\n${includeTable ? '- Include one simple comparison table only if it genuinely helps the reader. Use clean HTML table tags.\n' : '- Do not use HTML tables unless absolutely necessary.\n'}${includeFaq ? '- Include a helpful FAQ section near the end with 4-6 questions and direct answers.\n' : ''}${includeConclusion ? '- End with a useful conclusion and a soft, non-misleading call to action.\n' : ''}${includeBacklink ? '- If $backlink is provided and it is a valid URL, include it naturally exactly once as a contextual link. If no backlink is provided, do not mention it.\n' : ''}${complianceBlock}\n\nQuality control before final answer:\n- Check that the content matches "$topic" and "$keyword".\n- Check that there is one meta description paragraph and one H1.\n- Check that no restricted or fake claim is included.\n- Check that the HTML is clean and ready for WordPress publishing.\n${extraRules ? `\nExtra site-specific rules:\n${extraRules}\n` : ''}`;
 }
 
 function extractGeminiText(data){
@@ -62,15 +63,17 @@ export async function generatePromptWithGemini(input = {}){
   const master = `You are building a reusable WordPress Gemini article-generation prompt.\n\nReturn ONLY the final prompt text. Do not write an article. Do not use markdown fences.\n\nThe final prompt MUST:\n- Keep variables exactly as variables: $topic, $keyword, and $backlink.\n- Be safe for automatic blog generation.\n- Force clean HTML output.\n- Include strict restrictions against fake facts, guarantees, harmful claims, markdown, scripts, styles, and keyword stuffing.\n- Be suitable for every post generated from a CSV queue.\n- Include optional per-post overrides when a CSV row has a Prompt/CustomPrompt value.\n\nUse and improve this draft prompt without removing the safety rules:\n\n${base}`;
   const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
   const body = JSON.stringify({ contents: [{ parts: [{ text: master }] }], generationConfig: { temperature: 0.35, topP: 0.8, maxOutputTokens: 4096 } });
-  const r = await fetchWithTimeout(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body }, Number(process.env.GEMINI_TIMEOUT_MS || 60000));
+  const geminiTimeoutValue = Number(process.env.GEMINI_TIMEOUT_MS || 60000);
+  const geminiTimeout = Number.isFinite(geminiTimeoutValue) && geminiTimeoutValue > 0 ? geminiTimeoutValue : 60000;
+  const r = await fetchWithTimeout(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body }, geminiTimeout);
   const raw = await r.text();
   let data = {};
   try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
   if (!r.ok) {
-    const msg = data?.error?.message || raw || r.statusText;
+    const msg = redactSecrets(data?.error?.message || raw || r.statusText);
     const err = new Error('Gemini HTTP '+r.status+': '+msg);
     err.status = 400;
-    err.payload = data;
+    err.payload = redactSecrets(data);
     throw err;
   }
   let prompt = extractGeminiText(data);

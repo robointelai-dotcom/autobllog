@@ -3,12 +3,19 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { DEFAULT_TENANT, normalizeTenantSlug } from './tenants.js';
+
+function finiteNumber(value, fallback, min, max){
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
 const DEFAULT_USERNAME = process.env.DASHBOARD_DEFAULT_USER || 'admin';
 const DEFAULT_PASSWORD = process.env.DASHBOARD_DEFAULT_PASSWORD || 'admin@2020';
 const SESSION_COOKIE = process.env.DASHBOARD_SESSION_COOKIE || 'ab_dashboard_sid';
-const SESSION_DAYS = Math.max(1, Number(process.env.DASHBOARD_SESSION_DAYS || 7));
+const SESSION_DAYS = finiteNumber(process.env.DASHBOARD_SESSION_DAYS, 7, 1, 365);
 const SESSION_TTL_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
 const HASH_ITERATIONS = 120000;
 const KEY_LENGTH = 32;
@@ -48,9 +55,9 @@ function timingSafeEqualHex(a, b){
 
 function verifyPassword(password, passwordHash){
   if (!passwordHash?.salt || !passwordHash?.hash) return false;
-  const iterations = Number(passwordHash.iterations || HASH_ITERATIONS);
-  const keyLength = Number(passwordHash.keyLength || KEY_LENGTH);
-  const digest = passwordHash.digest || 'sha256';
+  const iterations = finiteNumber(passwordHash.iterations, HASH_ITERATIONS, 10000, 1000000);
+  const keyLength = finiteNumber(passwordHash.keyLength, KEY_LENGTH, 16, 64);
+  const digest = ['sha256','sha384','sha512'].includes(passwordHash.digest) ? passwordHash.digest : 'sha256';
   const candidate = crypto.pbkdf2Sync(String(password), passwordHash.salt, iterations, keyLength, digest).toString('hex');
   return timingSafeEqualHex(candidate, passwordHash.hash);
 }
@@ -154,13 +161,22 @@ export function requireDashboardAuth(req, res, next){
 
 export const authRouter = express.Router();
 
+const loginLimiter = rateLimit({
+  windowMs: finiteNumber(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000),
+  max: finiteNumber(process.env.LOGIN_RATE_LIMIT_MAX, 15, 3, 1000),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many login attempts. Please wait and try again.' }
+});
+
 authRouter.get('/me', (req, res) => {
   const user = getDashboardUser(req);
   if (!user) return res.status(401).json({ authenticated: false, error: 'Dashboard login required', tenantSlug: tenantFromReq(req) });
   res.json({ authenticated: true, user, sessionDays: SESSION_DAYS, tenantSlug: tenantFromReq(req), databaseName: req.tenantDatabaseName });
 });
 
-authRouter.post('/login', (req, res) => {
+authRouter.post('/login', loginLimiter, (req, res) => {
   const tenantSlug = tenantFromReq(req);
   const username = String(req.body?.username || '').trim();
   const password = String(req.body?.password || '');
@@ -185,10 +201,14 @@ authRouter.post('/change-password', requireDashboardAuth, (req, res) => {
   const updated = { ...store, username: newUsername, updatedAt: nowIso() };
   if (newPassword) { updated.passwordHash = hashPassword(newPassword); updated.passwordChangedAt = nowIso(); }
   saveStore(tenantSlug, updated);
-  const sid = getSessionId(req);
-  const session = sid ? sessions.get(sid) : null;
-  if (session && session.tenantSlug === tenantSlug) session.username = updated.username;
-  res.json({ ok: true, user: { username: updated.username, tenantSlug }, passwordChanged: Boolean(newPassword) });
+  // Invalidate every existing session for this client after a credential change,
+  // then issue one fresh session to the current browser.
+  for (const [sid, session] of sessions.entries()) {
+    if (session?.tenantSlug === tenantSlug) sessions.delete(sid);
+  }
+  const freshSid = createSession(updated.username, tenantSlug);
+  setSessionCookie(req, res, freshSid);
+  res.json({ ok: true, user: { username: updated.username, tenantSlug }, passwordChanged: Boolean(newPassword), sessionsReset: true });
 });
 
 initializeTenantAuth(DEFAULT_TENANT);

@@ -17,11 +17,19 @@ import queueRouter from './routes/queue.js';
 import historyRouter from './routes/history.js';
 import { defineJobs } from './lib/jobs.js';
 import { parseBoolean } from './lib/utils.js';
+import { redactSecrets } from './lib/http.js';
 import { authRouter, requireDashboardAuth } from './lib/auth.js';
 import { DEFAULT_TENANT, ensureDefaultClientRecord, tenantMiddleware } from './lib/tenants.js';
 import { currentInstanceSlug, isChildInstance, proxyToClientInstance, proxyToClientInstanceApi, startAllClientInstances } from './lib/instances.js';
 
-const APP_VERSION = 'v18-random-hourly-scheduler';
+const APP_VERSION = 'v18.3-deep-stability-fix';
+
+function finiteNumber(value, fallback, min = -Infinity, max = Infinity){
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 const INSTANCE_CHILD = isChildInstance();
 const INSTANCE_SLUG = currentInstanceSlug();
 const app = express();
@@ -29,21 +37,37 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 
-const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors({
-  origin(origin, cb){
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error('CORS blocked'));
-  },
-  credentials: true
+const allowedOrigins = new Set((process.env.CORS_ORIGINS || '').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean));
+app.use(cors((req, cb) => {
+  const origin = String(req.get('origin') || '').replace(/\/$/, '');
+  if (!origin) return cb(null, { origin: false, credentials: true });
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const proto = forwardedProto || req.protocol || 'http';
+  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
+  const host = forwardedHost || req.get('host') || '';
+  const sameOrigin = host && origin === `${proto}://${host}`;
+  const allowed = sameOrigin || allowedOrigins.has(origin);
+  if (!allowed) {
+    const err = new Error('CORS origin blocked');
+    err.status = 403;
+    return cb(err);
+  }
+  return cb(null, { origin, credentials: true });
 }));
 
-app.use(rateLimit({ windowMs: 60_000, max: Number(process.env.RATE_LIMIT_PER_MIN || 240), standardHeaders: true, legacyHeaders: false }));
-app.use(express.json({ limit: process.env.JSON_LIMIT || '64mb' }));
+app.use(rateLimit({ windowMs: 60_000, max: finiteNumber(process.env.RATE_LIMIT_PER_MIN, 240, 10, 100000), standardHeaders: true, legacyHeaders: false }));
+// Keep ordinary API requests reasonably small, but allow the dedicated plugin
+// upload route to carry a base64 ZIP. A 60 MB ZIP is about 80 MB as base64.
+const standardJsonParser = express.json({ limit: process.env.JSON_LIMIT || '16mb' });
+const pluginUploadJsonParser = express.json({ limit: process.env.PLUGIN_UPLOAD_JSON_LIMIT || '96mb' });
+app.use((req, res, next) => {
+  const isPluginUpload = /\/plugins\/upload(?:\?|$)/i.test(req.originalUrl || req.url || '');
+  return (isPluginUpload ? pluginUploadJsonParser : standardJsonParser)(req, res, next);
+});
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 const MONGO = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/remotecontroller';
-const PORT = Number(process.env.PORT || 4000);
+const PORT = finiteNumber(process.env.PORT, 4000, 1, 65535);
 const MANUAL_ONLY = parseBoolean(process.env.MANUAL_ONLY, false);
 const ADMIN_KEY = process.env.API_KEY || process.env.ADMIN_KEY || '';
 
@@ -53,7 +77,7 @@ await ensureDefaultClientRecord();
 const agenda = new Agenda({
   db: { address: MONGO, collection: 'agendaJobs' },
   processEvery: process.env.SCAN_EVERY || '1 minute',
-  maxConcurrency: Math.max(1, Number(process.env.AGENDA_MAX_CONCURRENCY || 20))
+  maxConcurrency: finiteNumber(process.env.AGENDA_MAX_CONCURRENCY, 20, 1, 100)
 });
 defineJobs(agenda);
 
@@ -75,7 +99,7 @@ function healthPayload(req){
 
 function adminKeyGuard(req, res, next){
   if (!ADMIN_KEY || req.method === 'GET' || req.method === 'OPTIONS' || req.path.startsWith('/auth/')) return next();
-  const key = req.get('x-admin-key') || req.query.key || (req.body && req.body.key);
+  const key = req.get('x-admin-key') || '';
   if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
   next();
 }
@@ -115,7 +139,7 @@ function mountApi(prefix, tenantGetter){
   app.use(prefix, router);
 }
 
-// v18 keeps fresh backend instances and adds random hourly scheduling.
+// v18.3 keeps fresh backend instances, safer client routing, and random hourly scheduling.
 // Client API calls go through /api/_client/:slug/*, then the main backend proxies to that client's dedicated Node process.
 // This keeps /new/ working even when Nginx serves the React build statically instead of proxying every path to Node.
 if (!INSTANCE_CHILD) {
@@ -139,9 +163,35 @@ app.get('*', (req, res, next) => {
 });
 
 app.use((err, _req, res, _next) => {
-  console.error('[api-error]', err);
+  const safeErrorForLog = redactSecrets({
+    name: err?.name,
+    message: err?.message,
+    code: err?.code,
+    status: err?.status || err?.statusCode,
+    payload: err?.payload,
+    stack: process.env.NODE_ENV === 'production' ? undefined : err?.stack
+  });
+  console.error('[api-error]', safeErrorForLog);
   if (res.headersSent) return;
-  res.status(err.status || 500).json({ error: err.message || 'Server error', appVersion: APP_VERSION });
+
+  let status = Number(err?.status || err?.statusCode || 500);
+  let message = redactSecrets(err?.message || 'Server error');
+  if (err?.code === 11000) {
+    status = 409;
+    const field = Object.keys(err?.keyPattern || err?.keyValue || {})[0];
+    message = field ? `A record with this ${field} already exists.` : 'This record already exists.';
+  } else if (err?.name === 'ValidationError' || err?.name === 'CastError') {
+    status = 400;
+    message = err?.message || 'Invalid request data.';
+  } else if (err?.type === 'entity.too.large') {
+    status = 413;
+    message = 'Request body is too large.';
+  } else if (err instanceof SyntaxError && 'body' in err) {
+    status = 400;
+    message = 'Request body contains invalid JSON.';
+  }
+  if (!Number.isInteger(status) || status < 400 || status > 599) status = 500;
+  res.status(status).json({ error: message, appVersion: APP_VERSION });
 });
 
 await agenda.start();
